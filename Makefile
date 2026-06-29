@@ -1,0 +1,159 @@
+SHELL := /bin/bash
+
+XPLANE_ROOT := /Users/robertw/X-Plane 12
+PLUGIN_DIR  := $(XPLANE_ROOT)/Resources/available plugins/xp_wellys_vfr_trainer
+
+SDK_SENTINEL    := sdk/XPLM/XPLMPlugin.h
+IMGUI_SENTINEL  := vendor/imgui/imgui.h
+JSON_SENTINEL   := vendor/json.hpp
+CATCH2_SENTINEL := vendor/catch2/catch_amalgamated.hpp
+
+CATCH2_VERSION := 3.15.1
+
+.PHONY: all help setup build install test test-unit lint format clean distclean
+
+.DEFAULT_GOAL := help
+
+all: clean format build lint test
+
+# ── Help ──────────────────────────────────────────────────────────────────────
+help:
+	@echo "xp_wellys_vfr_trainer - Makefile targets"
+	@echo ""
+	@echo "  make                Show this help (default)"
+	@echo "  make setup          Download X-Plane SDK, Dear ImGui, nlohmann/json, Catch2"
+	@echo "  make build          Build universal plugin (arm64 + x86_64) -> build/xp_wellys_vfr_trainer.xpl"
+	@echo "  make test           Build + run Catch2 unit tests"
+	@echo "  make install        Install + ad-hoc codesign the plugin into X-Plane"
+	@echo "  make format         Run clang-format on src/*.cpp src/*.hpp"
+	@echo "  make lint           Run clang-tidy on src/*.cpp"
+	@echo "  make clean          Remove build dirs"
+	@echo "  make distclean      clean + remove sdk/ and vendor/"
+
+# ── Setup ─────────────────────────────────────────────────────────────────────
+setup: $(SDK_SENTINEL) $(IMGUI_SENTINEL) $(JSON_SENTINEL) $(CATCH2_SENTINEL)
+	@echo "Setup complete. Run 'make build' to compile."
+
+$(SDK_SENTINEL):
+	@echo "Downloading X-Plane SDK..."
+	@set -euo pipefail; \
+	TMP=$$(mktemp -d); \
+	trap "rm -rf $$TMP" EXIT; \
+	curl -fsSL "https://developer.x-plane.com/wp-content/plugins/code-sample-generation/sdk_zip_files/XPSDK430.zip" \
+	     -o "$$TMP/sdk.zip"; \
+	unzip -q "$$TMP/sdk.zip" -d "$$TMP/sdk_extracted"; \
+	mkdir -p sdk/XPLM sdk/XPWidgets sdk/Libraries/Mac; \
+	find "$$TMP/sdk_extracted" -path "*/CHeaders/XPLM/*.h"    -exec cp {} sdk/XPLM/ \;; \
+	find "$$TMP/sdk_extracted" -path "*/CHeaders/Widgets/*.h" -exec cp {} sdk/XPWidgets/ \;; \
+	cp -R "$$TMP/sdk_extracted"/*/Libraries/Mac/*.framework sdk/Libraries/Mac/ 2>/dev/null || \
+	find "$$TMP/sdk_extracted" -name "*.framework" -exec cp -R {} sdk/Libraries/Mac/ \;
+	@echo "SDK headers installed."
+
+$(IMGUI_SENTINEL):
+	@echo "Downloading Dear ImGui v1.92.8..."
+	@set -euo pipefail; \
+	TMP=$$(mktemp -d); \
+	trap "rm -rf $$TMP" EXIT; \
+	mkdir -p vendor/imgui/backends; \
+	curl -fsSL "https://github.com/ocornut/imgui/archive/refs/tags/v1.92.8.zip" -o "$$TMP/imgui.zip"; \
+	unzip -q "$$TMP/imgui.zip" -d "$$TMP/"; \
+	SRC="$$TMP/imgui-1.92.8"; \
+	cp "$$SRC"/imgui.{h,cpp} vendor/imgui/; \
+	cp "$$SRC"/imgui_{draw,tables,widgets}.cpp vendor/imgui/; \
+	cp "$$SRC"/imgui_internal.h "$$SRC"/imconfig.h vendor/imgui/; \
+	cp "$$SRC"/imstb_textedit.h "$$SRC"/imstb_rectpack.h "$$SRC"/imstb_truetype.h vendor/imgui/ 2>/dev/null || true; \
+	cp "$$SRC"/backends/imgui_impl_opengl2.{h,cpp} vendor/imgui/backends/
+	@echo "Dear ImGui installed."
+
+$(JSON_SENTINEL):
+	@echo "Downloading nlohmann/json v3.12.0..."
+	@mkdir -p vendor
+	@curl -fsSL "https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp" \
+	     -o vendor/json.hpp
+	@echo "nlohmann/json installed."
+
+$(CATCH2_SENTINEL):
+	@echo "Downloading Catch2 v$(CATCH2_VERSION) (amalgamated)..."
+	@set -euo pipefail; \
+	TMP=$$(mktemp -d); \
+	trap "rm -rf $$TMP" EXIT; \
+	mkdir -p vendor/catch2; \
+	curl -fsSL "https://github.com/catchorg/Catch2/archive/refs/tags/v$(CATCH2_VERSION).tar.gz" \
+	     -o "$$TMP/catch2.tar.gz"; \
+	tar -xzf "$$TMP/catch2.tar.gz" -C "$$TMP/"; \
+	cp "$$TMP/Catch2-$(CATCH2_VERSION)/extras/catch_amalgamated.hpp" vendor/catch2/; \
+	cp "$$TMP/Catch2-$(CATCH2_VERSION)/extras/catch_amalgamated.cpp" vendor/catch2/
+	@echo "Catch2 installed."
+
+# ── Build ─────────────────────────────────────────────────────────────────────
+# Single universal build: the trainer is cloud-only (no local inference), so
+# both arm64 and x86_64 slices share an identical configuration. One CMake
+# build with CMAKE_OSX_ARCHITECTURES="arm64;x86_64" produces a universal .xpl
+# directly — no per-arch build dirs, no lipo merge.
+build: $(SDK_SENTINEL) $(IMGUI_SENTINEL) $(JSON_SENTINEL) $(CATCH2_SENTINEL)
+	@echo "=== Building universal xp_wellys_vfr_trainer (arm64 + x86_64) ==="
+	cmake -B build -DCMAKE_BUILD_TYPE=Release \
+	    -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+	    -DBUILD_TESTS=OFF \
+	    -Wno-dev
+	cmake --build build --parallel
+	@echo ""
+	@file build/xp_wellys_vfr_trainer.xpl
+	@lipo -info build/xp_wellys_vfr_trainer.xpl
+	@echo "Done. Run 'make install' to deploy the universal .xpl."
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
+# Host-arch only (no universal needed for a dev tool). Separate build dir so it
+# never collides with the universal `build/` Release tree.
+test: test-unit
+test-unit: $(SDK_SENTINEL) $(IMGUI_SENTINEL) $(JSON_SENTINEL) $(CATCH2_SENTINEL)
+	@echo "=== Building unit tests ==="
+	cmake -B build-test -DCMAKE_BUILD_TYPE=Release \
+	    -DCMAKE_OSX_ARCHITECTURES="$(shell uname -m)" \
+	    -DBUILD_TESTS=ON \
+	    -Wno-dev
+	cmake --build build-test --target xp_wellys_vfr_trainer_tests --parallel
+	@echo ""
+	@echo "=== Running unit tests ==="
+	@./build-test/xp_wellys_vfr_trainer_tests --order rand --rng-seed 42
+
+# ── Install ───────────────────────────────────────────────────────────────────
+install:
+	@if [ ! -f "build/xp_wellys_vfr_trainer.xpl" ]; then \
+	    echo "Plugin not built yet. Run 'make build' first."; exit 1; \
+	fi
+	@echo "=== Installing xp_wellys_vfr_trainer ==="
+	@mkdir -p "$(PLUGIN_DIR)/mac_x64"
+	@cp build/xp_wellys_vfr_trainer.xpl "$(PLUGIN_DIR)/mac_x64/"
+	@xattr -dr com.apple.quarantine "$(PLUGIN_DIR)/mac_x64/xp_wellys_vfr_trainer.xpl" 2>/dev/null || true
+	@codesign --force --deep --sign - "$(PLUGIN_DIR)/mac_x64/xp_wellys_vfr_trainer.xpl"
+	@mkdir -p "$(PLUGIN_DIR)/data"
+	@if [ ! -f "$(PLUGIN_DIR)/data/settings.json" ]; then \
+	    cp data/settings.json "$(PLUGIN_DIR)/data/"; \
+	    echo "Installed: $(PLUGIN_DIR)/data/settings.json"; \
+	else \
+	    echo "Kept existing settings.json"; \
+	fi
+	@echo "Installed and signed."
+
+# ── Lint / Format ─────────────────────────────────────────────────────────────
+format:
+	@command -v clang-format >/dev/null 2>&1 || { \
+	    echo "clang-format not found. Install with: brew install llvm"; exit 1; }
+	clang-format -i src/main.cpp src/*/*.cpp src/*/*.hpp
+
+lint: $(SDK_SENTINEL) $(IMGUI_SENTINEL) $(JSON_SENTINEL) $(CATCH2_SENTINEL)
+	@command -v clang-tidy >/dev/null 2>&1 || { \
+	    echo "clang-tidy not found. Install with: brew install llvm"; exit 1; }
+	cmake -B build-lint -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+	    -DCMAKE_OSX_ARCHITECTURES="$(shell uname -m)" -Wno-dev
+	clang-tidy -p build-lint --extra-arg="-isysroot" --extra-arg="$(shell xcrun --show-sdk-path)" \
+	    src/main.cpp src/*/*.cpp
+
+# ── Clean ─────────────────────────────────────────────────────────────────────
+clean:
+	rm -rf build/ build-test/ build-lint/
+
+distclean: clean
+	rm -rf sdk/ vendor/
+	@echo "Removed sdk/ and vendor/. Run 'make setup' to re-download dependencies."
