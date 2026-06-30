@@ -31,36 +31,35 @@ bool facility_is_endpoint(FacilityType f) {
   return f == FacilityType::TOWERED || f == FacilityType::AFIS;
 }
 
-// Does a (dep, dest) facility pair satisfy the requested ATC type?
-bool atc_pair_ok(AtcType t, FacilityType dep, FacilityType dest) {
-  switch (t) {
-  case AtcType::ANY:
-    return facility_is_endpoint(dep) && facility_is_endpoint(dest);
-  case AtcType::TOWER_TOWER:
-    return dep == FacilityType::TOWERED && dest == FacilityType::TOWERED;
-  case AtcType::TOWER_AFIS:
-    return dep == FacilityType::TOWERED && dest == FacilityType::AFIS;
-  case AtcType::AFIS_AFIS:
-    return dep == FacilityType::AFIS && dest == FacilityType::AFIS;
-  case AtcType::AFIS_TOWER:
-    return dep == FacilityType::AFIS && dest == FacilityType::TOWERED;
+// Does a destination's facility satisfy the requested filter?
+bool dest_facility_ok(DestFacility want, FacilityType dest) {
+  switch (want) {
+  case DestFacility::ANY:
+    return facility_is_endpoint(dest);
+  case DestFacility::TOWER:
+    return dest == FacilityType::TOWERED;
+  case DestFacility::AFIS:
+    return dest == FacilityType::AFIS;
   }
   return false;
 }
 
 } // namespace
 
-Country country_of(std::string_view icao) {
-  if (icao.size() < 2)
-    return Country::ANY;
-  const std::string_view p = icao.substr(0, 2);
-  if (p == "ED" || p == "ET")
-    return Country::DE;
-  if (p == "LS")
-    return Country::CH;
-  if (p == "LO")
-    return Country::AT;
-  return Country::ANY; // e.g. LZ — no dedicated selector
+const Airport *nearest_ga_airport(const std::vector<Airport> &airports,
+                                  double lat, double lon) {
+  const Airport *best = nullptr;
+  double best_m = 0.0;
+  for (const auto &a : airports) {
+    if (!is_ga_suitable(a))
+      continue;
+    const double m = airports::haversine_distance(lat, lon, a.lat, a.lon);
+    if (best == nullptr || m < best_m) {
+      best = &a;
+      best_m = m;
+    }
+  }
+  return best;
 }
 
 bool is_ga_suitable(const Airport &a) {
@@ -129,72 +128,50 @@ std::vector<Suggestion> suggest_flights(const std::vector<Airport> &airports,
                                         const Criteria &criteria,
                                         const ScoreFn &score,
                                         size_t max_results) {
-  // 1. Prefilter to GA-suitable airports matching the country selector, and
-  //    score each one once.
-  struct Cand {
-    const Airport *apt;
-    ScoreResult score;
-  };
-  std::vector<Cand> cands;
-  cands.reserve(airports.size());
-  for (const auto &a : airports) {
-    if (!is_ga_suitable(a))
-      continue;
-    if (criteria.country != Country::ANY &&
-        country_of(a.icao) != criteria.country)
-      continue;
-    cands.push_back({&a, score(a)});
-  }
+  // The departure is the anchor (criteria.dep_lat/lon) supplied by the plugin
+  // from the aircraft's current airport. The engine just lists reachable
+  // destinations around it; the field at the anchor drops out via the
+  // kMinFlightKm guard (distance ~0).
 
   // Latitude window for a cheap bbox prefilter (1 deg lat ~ 111 km).
-  const double lat_window =
-      criteria.max_distance_km / 111.0 + 0.05;
+  const double lat_window = criteria.max_distance_km / 111.0 + 0.05;
 
-  // 2. Build matching departure -> destination pairs.
   std::vector<Suggestion> out;
-  for (const auto &dep : cands) {
-    for (const auto &dest : cands) {
-      if (dep.apt == dest.apt)
-        continue;
-      if (!atc_pair_ok(criteria.atc_type, dep.apt->facility,
-                       dest.apt->facility))
-        continue;
-      // Difficulty applies to the destination (where you operate / land).
-      if (criteria.difficulty != Difficulty::ANY &&
-          difficulty_bucket(dest.score.value) != criteria.difficulty)
-        continue;
-      if (std::fabs(dep.apt->lat - dest.apt->lat) > lat_window)
-        continue; // bbox guard
-      const double km = airports::haversine_distance(
-                            dep.apt->lat, dep.apt->lon, dest.apt->lat,
-                            dest.apt->lon) /
-                        1000.0;
-      if (km <= kMinFlightKm || km > criteria.max_distance_km)
-        continue;
+  for (const auto &dest : airports) {
+    if (!is_ga_suitable(dest))
+      continue;
+    if (!dest_facility_ok(criteria.dest_facility, dest.facility))
+      continue;
+    const ScoreResult dest_score = score(dest);
+    // Difficulty applies to the destination (where you operate / land).
+    if (criteria.difficulty != Difficulty::ANY &&
+        difficulty_bucket(dest_score.value) != criteria.difficulty)
+      continue;
+    if (std::fabs(criteria.dep_lat - dest.lat) > lat_window)
+      continue; // bbox guard
+    const double km = airports::haversine_distance(criteria.dep_lat,
+                                                   criteria.dep_lon, dest.lat,
+                                                   dest.lon) /
+                      1000.0;
+    if (km <= kMinFlightKm || km > criteria.max_distance_km)
+      continue;
 
-      Suggestion s;
-      s.dep_icao = dep.apt->icao;
-      s.dep_name = dep.apt->name;
-      s.dest_icao = dest.apt->icao;
-      s.dest_name = dest.apt->name;
-      s.distance_km = km;
-      s.dep_facility = dep.apt->facility;
-      s.dest_facility = dest.apt->facility;
-      s.dep_difficulty = dep.score.value;
-      s.dest_difficulty = dest.score.value;
-      // Provenance follows the destination's score (the bucket-relevant one).
-      s.difficulty_source = dest.score.source;
-      out.push_back(std::move(s));
-    }
+    Suggestion s;
+    s.dest_icao = dest.icao;
+    s.dest_name = dest.name;
+    s.distance_km = km;
+    s.dest_facility = dest.facility;
+    s.dest_difficulty = dest_score.value;
+    // Provenance follows the destination's score (the bucket-relevant one).
+    s.difficulty_source = dest_score.source;
+    out.push_back(std::move(s));
   }
 
-  // 3. Deterministic ranking: longer flights first (use the allowed radius),
-  //    stable tie-break by ICAO pair.
+  // Deterministic ranking: nearest destinations first (the "what's reachable
+  // around me" model), stable tie-break by destination ICAO.
   std::sort(out.begin(), out.end(), [](const Suggestion &a, const Suggestion &b) {
     if (a.distance_km != b.distance_km)
-      return a.distance_km > b.distance_km;
-    if (a.dep_icao != b.dep_icao)
-      return a.dep_icao < b.dep_icao;
+      return a.distance_km < b.distance_km;
     return a.dest_icao < b.dest_icao;
   });
 

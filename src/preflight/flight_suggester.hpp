@@ -12,25 +12,25 @@
 
 #include <functional>
 #include <string>
-#include <string_view>
 #include <vector>
 
-// Rule-based pre-flight suggestion engine (CONCEPT.md section 2). Turns the
-// user's criteria into concrete departure -> destination flight suggestions
-// drawn from the DACH airport list. No LLM: the same inputs always produce the
-// same output. SDK-free → unit-testable.
+// Rule-based pre-flight suggestion engine (CONCEPT.md section 2). Given a
+// departure anchor (the aircraft's current airport, resolved by the plugin
+// layer from X-Plane's nav database) it lists reachable destinations within the
+// requested radius. No LLM: the same inputs always produce the same output.
+// SDK-free → the anchor position (lat/lon) is injected via Criteria, never read
+// here. The engine does NOT pick the departure airport — that is the plugin's
+// job (the nav DB is authoritative, unlike the apt.dat-derived list which can
+// omit airports with sparse frequency data).
 namespace preflight {
 
 using airports::Airport;
 using airports::FacilityType;
 
-// Country selector. DE = ICAO prefixes ED/ET, CH = LS, AT = LO. ANY spans all
-// DACH airports (also includes LZ, which has no dedicated selector).
-enum class Country { ANY, DE, CH, AT };
-
-// Departure-facility -> destination-facility pairing. AFIS covers Info/Radio
-// fields; uncontrolled (UNICOM/CTAF) fields are never a Tower or AFIS endpoint.
-enum class AtcType { ANY, TOWER_TOWER, TOWER_AFIS, AFIS_AFIS, AFIS_TOWER };
+// Destination facility filter. The departure facility is fixed by the aircraft's
+// position, so only the destination is selectable. AFIS covers Info/Radio
+// fields; uncontrolled (UNICOM/CTAF) fields are never an endpoint.
+enum class DestFacility { ANY, TOWER, AFIS };
 
 // Difficulty bucket. Maps to a 1-10 score: EASY 1-3, MEDIUM 4-6, HARD 7-10.
 enum class Difficulty { ANY, EASY, MEDIUM, HARD };
@@ -41,21 +41,20 @@ enum class Difficulty { ANY, EASY, MEDIUM, HARD };
 enum class DifficultySource { PROVISIONAL_RULE, LLM_SCORE };
 
 struct Criteria {
-  Country country = Country::ANY;
-  AtcType atc_type = AtcType::ANY;
+  // Current aircraft position; the departure is resolved to the nearest
+  // GA-suitable field. Supplied by the plugin layer from the sim datarefs.
+  double dep_lat = 0.0;
+  double dep_lon = 0.0;
+  DestFacility dest_facility = DestFacility::ANY;
   double max_distance_km = 150.0;
   Difficulty difficulty = Difficulty::ANY;
 };
 
 struct Suggestion {
-  std::string dep_icao;
-  std::string dep_name;
   std::string dest_icao;
   std::string dest_name;
-  double distance_km = 0.0;
-  FacilityType dep_facility = FacilityType::UNKNOWN;
+  double distance_km = 0.0; // from the departure anchor
   FacilityType dest_facility = FacilityType::UNKNOWN;
-  int dep_difficulty = 0;  // 1-10
   int dest_difficulty = 0; // 1-10, the bucket-relevant value
   DifficultySource difficulty_source = DifficultySource::PROVISIONAL_RULE;
 };
@@ -68,8 +67,11 @@ struct ScoreResult {
 
 using ScoreFn = std::function<ScoreResult(const Airport &)>;
 
-// ICAO -> Country (ANY when not a recognised DACH prefix).
-Country country_of(std::string_view icao);
+// Nearest GA-suitable airport to the given position, or nullptr when the list
+// holds none. Provided as a fallback for resolving the departure when the nav
+// database is unavailable; suggest_flights does not use it.
+const Airport *nearest_ga_airport(const std::vector<Airport> &airports,
+                                  double lat, double lon);
 
 // GA-suitable: ICAO set, at least one runway of usable surface and a minimum
 // length, and a Tower or AFIS facility (the dialog only deals in controlled /

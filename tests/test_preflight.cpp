@@ -58,12 +58,18 @@ std::vector<Airport> sample() {
   };
 }
 
-bool has_pair(const std::vector<Suggestion> &v, const std::string &dep,
-              const std::string &dest) {
+bool has_dest(const std::vector<Suggestion> &v, const std::string &dest) {
   for (const auto &s : v)
-    if (s.dep_icao == dep && s.dest_icao == dest)
+    if (s.dest_icao == dest)
       return true;
   return false;
+}
+
+const Airport *find_icao(const std::vector<Airport> &v, const std::string &icao) {
+  for (const auto &a : v)
+    if (a.icao == icao)
+      return &a;
+  return nullptr;
 }
 
 } // namespace
@@ -77,43 +83,72 @@ TEST_CASE("is_ga_suitable rejects unusable fields", "[preflight]") {
   REQUIRE_FALSE(is_ga_suitable(v[6]));  // uncontrolled (no Tower/AFIS)
 }
 
-TEST_CASE("country filter keeps only matching ICAO prefixes", "[preflight]") {
+TEST_CASE("nearest_ga_airport picks the closest GA field, skipping decoys",
+          "[preflight]") {
+  auto v = sample();
+  // Sitting exactly on EDAA -> EDAA is the departure.
+  REQUIRE(nearest_ga_airport(v, 48.0, 9.0)->icao == "EDAA");
+  // Sitting on the uncontrolled decoy EDUC (48.3, 9.1): it is not GA-suitable,
+  // so the nearest *usable* field (EDAB at 48.5, 9.0) wins.
+  REQUIRE(nearest_ga_airport(v, 48.3, 9.1)->icao == "EDAB");
+  // A list with no GA-suitable field at all -> nullptr.
+  std::vector<Airport> only_decoys = {
+      mk("EDUC", "Unctrl", 48.3, 9.1, 500.0f, FacilityType::UNCONTROLLED, 1500.0f, 2, 1),
+  };
+  REQUIRE(nearest_ga_airport(only_decoys, 48.0, 9.0) == nullptr);
+}
+
+TEST_CASE("the field at the anchor is never a destination", "[preflight]") {
   Criteria c;
-  c.country = Country::DE;
-  c.max_distance_km = 100.0;
+  c.dep_lat = 48.0; // on EDAA
+  c.dep_lon = 9.0;
+  c.max_distance_km = 1000.0;
   auto v = suggest_flights(sample(), c);
   REQUIRE_FALSE(v.empty());
-  for (const auto &s : v) {
-    REQUIRE(country_of(s.dep_icao) == Country::DE);
-    REQUIRE(country_of(s.dest_icao) == Country::DE);
-  }
+  for (const auto &s : v)
+    REQUIRE(s.dest_icao != "EDAA"); // excluded by the kMinFlightKm guard
 }
 
-TEST_CASE("ATC type pairs departure and destination facility", "[preflight]") {
+TEST_CASE("destinations lie within max_distance of the anchor", "[preflight]") {
   Criteria c;
-  c.country = Country::DE;
-  c.atc_type = AtcType::TOWER_AFIS;
-  c.max_distance_km = 100.0;
-  auto v = suggest_flights(sample(), c);
-  REQUIRE(v.size() == 1); // only EDAA(Tower) -> EDAB(AFIS) within 100 km
-  REQUIRE(v[0].dep_icao == "EDAA");
-  REQUIRE(v[0].dest_icao == "EDAB");
-  REQUIRE(v[0].dep_facility == FacilityType::TOWERED);
-  REQUIRE(v[0].dest_facility == FacilityType::AFIS);
-}
-
-TEST_CASE("distance cap excludes far pairs", "[preflight]") {
-  Criteria c;
-  c.max_distance_km = 60.0; // EDAA-EDAB ~55 km in; CH/AT pairs far out
+  c.dep_lat = 48.0; // on EDAA
+  c.dep_lon = 9.0;
+  c.max_distance_km = 60.0; // EDAB ~55 km in; LSAA/LOAA far out
   auto v = suggest_flights(sample(), c);
   REQUIRE_FALSE(v.empty());
   for (const auto &s : v)
     REQUIRE(s.distance_km <= 60.0);
-  REQUIRE(has_pair(v, "EDAA", "EDAB"));
+  REQUIRE(has_dest(v, "EDAB"));
+}
+
+TEST_CASE("dest_facility filter keeps only the requested facility", "[preflight]") {
+  Criteria base;
+  base.dep_lat = 48.0; // on EDAA (a Tower field)
+  base.dep_lon = 9.0;
+  base.max_distance_km = 1000.0;
+
+  SECTION("AFIS only") {
+    Criteria c = base;
+    c.dest_facility = DestFacility::AFIS;
+    auto v = suggest_flights(sample(), c);
+    REQUIRE_FALSE(v.empty());
+    for (const auto &s : v)
+      REQUIRE(s.dest_facility == FacilityType::AFIS);
+  }
+  SECTION("Tower only") {
+    Criteria c = base;
+    c.dest_facility = DestFacility::TOWER;
+    auto v = suggest_flights(sample(), c);
+    REQUIRE_FALSE(v.empty());
+    for (const auto &s : v)
+      REQUIRE(s.dest_facility == FacilityType::TOWERED);
+  }
 }
 
 TEST_CASE("difficulty filter matches destination bucket", "[preflight]") {
   Criteria c;
+  c.dep_lat = 48.0; // on EDAA
+  c.dep_lon = 9.0;
   c.difficulty = Difficulty::EASY; // EDAB(3) and LOAA(2) are EASY
   c.max_distance_km = 1000.0;
   auto v = suggest_flights(sample(), c);
@@ -122,48 +157,53 @@ TEST_CASE("difficulty filter matches destination bucket", "[preflight]") {
     REQUIRE(difficulty_bucket(s.dest_difficulty) == Difficulty::EASY);
 }
 
-TEST_CASE("suggestions are deterministic and flagged provisional",
+TEST_CASE("suggestions are deterministic, provisional and nearest-first",
           "[preflight]") {
   Criteria c;
+  c.dep_lat = 48.0; // on EDAA
+  c.dep_lon = 9.0;
   c.max_distance_km = 1000.0;
   auto a = suggest_flights(sample(), c);
   auto b = suggest_flights(sample(), c);
   REQUIRE(a.size() == b.size());
   for (size_t i = 0; i < a.size(); ++i) {
-    REQUIRE(a[i].dep_icao == b[i].dep_icao);
     REQUIRE(a[i].dest_icao == b[i].dest_icao);
     REQUIRE(a[i].distance_km == Catch::Approx(b[i].distance_km));
     // Until #5, every difficulty value is a provisional placeholder.
     REQUIRE(a[i].difficulty_source == DifficultySource::PROVISIONAL_RULE);
   }
-  // Ranked by descending distance.
+  // Ranked by ascending distance (nearest destinations first).
   for (size_t i = 1; i < a.size(); ++i)
-    REQUIRE(a[i - 1].distance_km >= a[i].distance_km);
+    REQUIRE(a[i - 1].distance_km <= a[i].distance_km);
 }
 
-TEST_CASE("no matches yields an empty result", "[preflight]") {
+TEST_CASE("no reachable destination yields an empty result", "[preflight]") {
   Criteria c;
-  c.country = Country::DE;
-  c.atc_type = AtcType::TOWER_TOWER; // only one DE tower (EDAA) -> no pair
-  c.max_distance_km = 1000.0;
+  c.dep_lat = 48.0; // on EDAA — a departure exists ...
+  c.dep_lon = 9.0;
+  c.max_distance_km = 1.0; // ... but nothing is within 1 km
   auto v = suggest_flights(sample(), c);
   REQUIRE(v.empty());
 }
 
-TEST_CASE("integration: real fixture yields EDDS -> EDFT for TOWER_AFIS",
+TEST_CASE("integration: anchoring on EDDS reaches EDFT for an AFIS filter",
           "[preflight]") {
   std::ifstream in(TESTDATA_DIR "/sample_apt.dat");
   REQUIRE(in.is_open());
   auto apts = airports::parse_apt_dat(in); // DACH: EDDS, EDFT, LSZH, LOWW
 
+  // Anchor on EDDS's reference position (as the plugin would after resolving
+  // the current airport from the nav DB).
+  const Airport *edds = find_icao(apts, "EDDS");
+  REQUIRE(edds != nullptr);
+
   Criteria c;
-  c.country = Country::DE;          // EDDS, EDFT
-  c.atc_type = AtcType::TOWER_AFIS; // EDDS tower -> EDFT afis
-  c.max_distance_km = 250.0;        // EDDS-EDFT ~221 km
+  c.dep_lat = edds->lat;
+  c.dep_lon = edds->lon;
+  c.dest_facility = DestFacility::AFIS; // EDFT is the AFIS field
+  c.max_distance_km = 250.0;            // EDDS-EDFT ~221 km
   auto v = suggest_flights(apts, c);
-  REQUIRE(has_pair(v, "EDDS", "EDFT"));
-  for (const auto &s : v) {
-    REQUIRE(s.dep_facility == FacilityType::TOWERED);
+  REQUIRE(has_dest(v, "EDFT"));
+  for (const auto &s : v)
     REQUIRE(s.dest_facility == FacilityType::AFIS);
-  }
 }

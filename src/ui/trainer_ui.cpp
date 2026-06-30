@@ -13,12 +13,16 @@
 #include "ui/trainer_ui.hpp"
 
 #include "airports/airport_db.hpp"
+#include "backends/loader.hpp"
 #include "backends/manager.hpp"
 #include "persistence/settings.hpp"
 #include "preflight/flight_suggester.hpp"
+#include "ui/clipboard.hpp"
 
+#include <XPLMDataAccess.h>
 #include <XPLMDisplay.h>
 #include <XPLMGraphics.h>
+#include <XPLMNavigation.h>
 #include <XPLMProcessing.h>
 #include <XPLMUtilities.h>
 
@@ -32,6 +36,8 @@
 #endif
 
 #include <algorithm>
+#include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -87,14 +93,47 @@ XPLMCursorStatus wnd_cursor_cb(XPLMWindowID, int, int, void *) {
   return xplm_CursorDefault;
 }
 
-void wnd_key_cb(XPLMWindowID, char, XPLMKeyFlags, char vkey, void *,
+void wnd_key_cb(XPLMWindowID, char key, XPLMKeyFlags flags, char vkey, void *,
                 int losing_focus) {
   if (losing_focus) {
     ImGui::GetIO().AddFocusEvent(false);
     return;
   }
-  // Scaffold window has no text input; only handle Escape to close.
-  if (vkey == XPLM_VK_ESCAPE) {
+  ImGuiIO &io = ImGui::GetIO();
+  // Only consume keys when ImGui has an active text input (the Settings tab's
+  // API-key field). Otherwise let X-Plane handle them (command bindings, etc.).
+  if (!io.WantTextInput)
+    return;
+  bool is_down = (flags & xplm_DownFlag) != 0;
+  bool is_up = (flags & xplm_UpFlag) != 0;
+  // Map editing/navigation keys for both press and release so ImGui doesn't get
+  // stuck with a "held" key (e.g. Backspace deleting forever).
+  ImGuiKey ikey = ImGuiKey_None;
+  if (vkey == XPLM_VK_BACK)
+    ikey = ImGuiKey_Backspace;
+  else if (vkey == XPLM_VK_DELETE)
+    ikey = ImGuiKey_Delete;
+  else if (vkey == XPLM_VK_RETURN)
+    ikey = ImGuiKey_Enter;
+  else if (vkey == XPLM_VK_LEFT)
+    ikey = ImGuiKey_LeftArrow;
+  else if (vkey == XPLM_VK_RIGHT)
+    ikey = ImGuiKey_RightArrow;
+  else if (vkey == XPLM_VK_HOME)
+    ikey = ImGuiKey_Home;
+  else if (vkey == XPLM_VK_END)
+    ikey = ImGuiKey_End;
+  else if (vkey == XPLM_VK_TAB)
+    ikey = ImGuiKey_Tab;
+  if (ikey != ImGuiKey_None) {
+    if (is_down)
+      io.AddKeyEvent(ikey, true);
+    if (is_up)
+      io.AddKeyEvent(ikey, false);
+  }
+  if (is_down && key >= 32 && key < 127)
+    io.AddInputCharacter(static_cast<unsigned>(key));
+  if (is_down && vkey == XPLM_VK_ESCAPE) {
     visible = false;
     if (window_id) {
       XPLMSetWindowIsVisible(window_id, 0);
@@ -126,42 +165,118 @@ const char *facility_short(airports::FacilityType f) {
   return "?";
 }
 
-void draw_main_window() {
-  ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "VFR Trainer");
-#ifdef XP_WELLYS_TRAINER_VERSION
-  ImGui::SameLine();
-  ImGui::TextDisabled("v%s", XP_WELLYS_TRAINER_VERSION);
-#endif
-  ImGui::Separator();
+// Short country code from an ICAO prefix (display only). Empty for prefixes
+// outside the DACH set so a border crossing is easy to spot in the table.
+const char *country_code(const std::string &icao) {
+  if (icao.size() < 2)
+    return "";
+  const std::string p = icao.substr(0, 2);
+  if (p == "ED" || p == "ET")
+    return "DE";
+  if (p == "LS")
+    return "CH";
+  if (p == "LO")
+    return "AT";
+  if (p == "LZ")
+    return "SK";
+  return "";
+}
 
+// Current aircraft position from the sim datarefs. The refs are looked up once
+// and cached. Returns false when they are unavailable (no aircraft loaded yet),
+// leaving lat/lon untouched.
+bool current_aircraft_position(double &lat, double &lon) {
+  static XPLMDataRef lat_ref =
+      XPLMFindDataRef("sim/flightmodel/position/latitude");
+  static XPLMDataRef lon_ref =
+      XPLMFindDataRef("sim/flightmodel/position/longitude");
+  if (lat_ref == nullptr || lon_ref == nullptr)
+    return false;
+  lat = XPLMGetDatad(lat_ref);
+  lon = XPLMGetDatad(lon_ref);
+  return true;
+}
+
+// Resolve the airport at / nearest to the given position via X-Plane's nav
+// database. This is authoritative — unlike our apt.dat-derived DACH list, which
+// can omit a field (e.g. EDNY) when its frequency data is sparse and would then
+// snap the departure to the wrong airport across a border (e.g. LSZR). Fills
+// icao/name and the airport's reference coordinates; returns false when the nav
+// DB has no airport (or is not loaded).
+bool resolve_current_airport(double cur_lat, double cur_lon, std::string &icao,
+                             std::string &name, double &apt_lat,
+                             double &apt_lon) {
+  float flat = static_cast<float>(cur_lat);
+  float flon = static_cast<float>(cur_lon);
+  XPLMNavRef ref =
+      XPLMFindNavAid(nullptr, nullptr, &flat, &flon, nullptr, xplm_Nav_Airport);
+  if (ref == XPLM_NAV_NOT_FOUND)
+    return false;
+  char id_buf[32] = {};
+  char name_buf[256] = {};
+  float alat = 0.0f, alon = 0.0f;
+  XPLMGetNavAidInfo(ref, nullptr, &alat, &alon, nullptr, nullptr, nullptr,
+                    id_buf, name_buf, nullptr);
+  icao = id_buf;
+  name = name_buf;
+  apt_lat = alat;
+  apt_lon = alon;
+  return true;
+}
+
+void draw_flight_tab() {
   if (!airports::airport_db::ready()) {
     ImGui::TextDisabled("Loading DACH airports from apt.dat...");
     return;
   }
 
-  ImGui::Text("Pre-flight: %zu DACH airports", airports::airport_db::count());
-  ImGui::Spacing();
+  const ImVec4 warn(1.0f, 0.6f, 0.2f, 1.0f);
 
-  // ── Criteria (rule-based, no LLM) ──────────────────────────────
-  static int country_idx = 0; // ANY, DE, CH, AT
-  static int atc_idx = 0;     // ANY, T->T, T->AFIS, AFIS->AFIS, AFIS->T
-  static int diff_idx = 0;    // ANY, EASY, MEDIUM, HARD
-  static int limit_mode = 0;  // 0 = distance km, 1 = duration min
+  // ── Departure: live "From:" line ───────────────────────────────
+  // Resolve the current airport from the nav DB, refreshed ~1/s (XPLMFindNavAid
+  // is not free) so the line tracks the aircraft as it taxis between fields.
+  static double last_resolve = -1.0;
+  static bool dep_found = false;
+  static std::string dep_icao, dep_name;
+  static double anchor_lat = 0.0, anchor_lon = 0.0;
+
+  const float now = get_xp_time();
+  if (last_resolve < 0.0 || now - last_resolve > 1.0) {
+    last_resolve = now;
+    double cur_lat = 0.0, cur_lon = 0.0;
+    dep_found = current_aircraft_position(cur_lat, cur_lon) &&
+                resolve_current_airport(cur_lat, cur_lon, dep_icao, dep_name,
+                                        anchor_lat, anchor_lon);
+  }
+
+  if (dep_found) {
+    const char *cc = country_code(dep_icao);
+    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "From: %s %s%s%s%s",
+                       dep_icao.c_str(), dep_name.c_str(), cc[0] ? " (" : "", cc,
+                       cc[0] ? ")" : "");
+  } else {
+    ImGui::TextColored(warn, "From: position unavailable - load a flight first.");
+  }
+
+  ImGui::Separator();
+
+  // ── Destination criteria (rule-based, no LLM) ──────────────────
+  ImGui::TextDisabled("To:");
+  static int dest_idx = 0;   // ANY, TOWER, AFIS (preflight::DestFacility)
+  static int diff_idx = 0;   // ANY, EASY, MEDIUM, HARD
+  static int limit_mode = 0; // 0 = distance km, 1 = duration min
   static int distance_km = 150;
   static int duration_min = 60;
   static std::vector<preflight::Suggestion> results;
+  static std::string searched_dep_icao; // departure at last search (for crossing)
   static bool searched = false;
 
-  static const char *country_labels[] = {"Any", "Germany", "Switzerland",
-                                          "Austria"};
-  static const char *atc_labels[] = {"Any", "Tower -> Tower", "Tower -> AFIS",
-                                     "AFIS -> AFIS", "AFIS -> Tower"};
+  static const char *dest_labels[] = {"Any", "Tower", "AFIS"};
   static const char *diff_labels[] = {"Any", "Easy", "Medium", "Hard"};
   static const char *limit_labels[] = {"Max distance (km)",
                                        "Max duration (min)"};
 
-  ImGui::Combo("Country", &country_idx, country_labels, 4);
-  ImGui::Combo("ATC type", &atc_idx, atc_labels, 5);
+  ImGui::Combo("Destination", &dest_idx, dest_labels, 3);
   ImGui::Combo("Difficulty", &diff_idx, diff_labels, 4);
   ImGui::Combo("Limit by", &limit_mode, limit_labels, 2);
   if (limit_mode == 0)
@@ -171,15 +286,20 @@ void draw_main_window() {
 
   if (ImGui::Button("Suggest flights")) {
     preflight::Criteria c;
-    c.country = static_cast<preflight::Country>(country_idx);
-    c.atc_type = static_cast<preflight::AtcType>(atc_idx);
+    c.dep_lat = anchor_lat;
+    c.dep_lon = anchor_lon;
+    c.dest_facility = static_cast<preflight::DestFacility>(dest_idx);
     c.difficulty = static_cast<preflight::Difficulty>(diff_idx);
     if (limit_mode == 0)
       c.max_distance_km = static_cast<double>(distance_km);
     else
       c.max_distance_km = (static_cast<double>(duration_min) / 60.0) *
                           kAssumedGaGroundspeedKts * 1.852; // kt -> km/h
-    results = preflight::suggest_flights(airports::airport_db::airports(), c);
+
+    searched_dep_icao = dep_found ? dep_icao : std::string();
+    results = dep_found
+                  ? preflight::suggest_flights(airports::airport_db::airports(), c)
+                  : std::vector<preflight::Suggestion>{};
     searched = true;
   }
 
@@ -187,9 +307,12 @@ void draw_main_window() {
     return;
 
   ImGui::Separator();
+  if (searched_dep_icao.empty()) {
+    ImGui::TextColored(warn, "No airport at your position - load a flight first.");
+    return;
+  }
   if (results.empty()) {
-    ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f),
-                       "No matching airports - relax your criteria.");
+    ImGui::TextColored(warn, "No destinations within your criteria - relax them.");
     return;
   }
 
@@ -198,26 +321,34 @@ void draw_main_window() {
   ImGui::TextDisabled(
       "Difficulty: ~N = provisional rule-based estimate (real LLM score #5)");
 
+  const char *dep_cc = country_code(searched_dep_icao);
+
   ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
                           ImGuiTableFlags_SizingFixedFit;
   if (ImGui::BeginTable("suggestions", 5, flags)) {
-    ImGui::TableSetupColumn("Departure");
     ImGui::TableSetupColumn("Destination");
     ImGui::TableSetupColumn("km");
-    ImGui::TableSetupColumn("ATC");
+    ImGui::TableSetupColumn("Fac");
+    ImGui::TableSetupColumn("Ctry");
     ImGui::TableSetupColumn("Diff");
     ImGui::TableHeadersRow();
     for (const auto &s : results) {
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
-      ImGui::Text("%s %s", s.dep_icao.c_str(), s.dep_name.c_str());
-      ImGui::TableSetColumnIndex(1);
       ImGui::Text("%s %s", s.dest_icao.c_str(), s.dest_name.c_str());
-      ImGui::TableSetColumnIndex(2);
+      ImGui::TableSetColumnIndex(1);
       ImGui::Text("%.0f", s.distance_km);
+      ImGui::TableSetColumnIndex(2);
+      ImGui::Text("%s", facility_short(s.dest_facility));
       ImGui::TableSetColumnIndex(3);
-      ImGui::Text("%s->%s", facility_short(s.dep_facility),
-                  facility_short(s.dest_facility));
+      // Highlight a border crossing: destination country differs from departure.
+      const char *dest_cc = country_code(s.dest_icao);
+      const bool crossing =
+          dest_cc[0] && dep_cc[0] && std::strcmp(dest_cc, dep_cc) != 0;
+      if (crossing)
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "%s", dest_cc);
+      else
+        ImGui::Text("%s", dest_cc);
       ImGui::TableSetColumnIndex(4);
       if (s.difficulty_source == preflight::DifficultySource::PROVISIONAL_RULE)
         ImGui::TextDisabled("~%d", s.dest_difficulty);
@@ -225,6 +356,174 @@ void draw_main_window() {
         ImGui::Text("%d", s.dest_difficulty);
     }
     ImGui::EndTable();
+  }
+}
+
+// ── Settings tab (LLM provider config) ───────────────────────────
+
+// Renders the API-key controls + LM-model picker for one cloud provider. The
+// settings layer keeps OpenAI and Mistral keys in separate Keychain entries
+// and exposes parallel getters/setters, so the panel is parametrised by plain
+// function pointers rather than duplicated per provider.
+void draw_key_panel(bool (*key_saved)(), bool (*key_save)(const std::string &),
+                    void (*key_delete)(), std::string (*model_get)(),
+                    void (*model_set)(const std::string &),
+                    const char *const *models, int model_count, char *buf,
+                    size_t buf_size, float &fb_timer, char *fb_msg,
+                    size_t fb_size) {
+  if (key_saved())
+    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f),
+                       "API key saved (Keychain)");
+  else
+    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "No API key configured");
+
+  ImGui::InputText("API key", buf, buf_size, ImGuiInputTextFlags_Password);
+
+  // Cmd+V into a password InputText is unreliable in the X-Plane ImGui context
+  // (the sim grabs key events first) and ImGui::GetClipboardText() only sees
+  // ImGui's internal buffer here — read NSPasteboard directly instead.
+  if (ImGui::Button("Paste")) {
+    std::string clip = ui::clipboard::read_system_text();
+    if (!clip.empty()) {
+      std::strncpy(buf, clip.c_str(), buf_size - 1);
+      buf[buf_size - 1] = '\0';
+      std::snprintf(fb_msg, fb_size, "Pasted %zu characters",
+                    std::strlen(buf));
+    } else {
+      std::snprintf(fb_msg, fb_size, "Clipboard is empty");
+    }
+    fb_timer = 3.0f;
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Save key")) {
+    if (buf[0] != '\0' && key_save(buf)) {
+      std::snprintf(fb_msg, fb_size, "API key saved");
+      // The key now lives in the Keychain only — wipe the in-memory copy.
+      std::memset(buf, 0, buf_size);
+      backends::loader::stop();
+      backends::loader::start();
+    } else {
+      std::snprintf(fb_msg, fb_size, "Save failed (empty key or Keychain error)");
+    }
+    fb_timer = 3.0f;
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Delete key")) {
+    key_delete();
+    std::memset(buf, 0, buf_size);
+    std::snprintf(fb_msg, fb_size, "API key deleted");
+    fb_timer = 3.0f;
+    backends::loader::stop();
+    backends::loader::start();
+  }
+  if (fb_timer > 0.0f) {
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "%s", fb_msg);
+    fb_timer -= ImGui::GetIO().DeltaTime;
+  }
+
+  // LM model picker. The current value is always offered even if it is not one
+  // of the hard-coded presets, so a manually-edited settings.json is preserved.
+  std::vector<std::string> opts(models, models + model_count);
+  std::string cur = model_get();
+  if (std::find(opts.begin(), opts.end(), cur) == opts.end())
+    opts.insert(opts.begin(), cur);
+  int sel = 0;
+  for (size_t i = 0; i < opts.size(); ++i) {
+    if (opts[i] == cur) {
+      sel = static_cast<int>(i);
+      break;
+    }
+  }
+  std::vector<const char *> labels;
+  labels.reserve(opts.size());
+  for (const auto &s : opts)
+    labels.push_back(s.c_str());
+  if (ImGui::Combo("LM model", &sel, labels.data(),
+                   static_cast<int>(labels.size()))) {
+    model_set(opts[static_cast<size_t>(sel)]);
+    settings::save();
+  }
+}
+
+void draw_settings_tab() {
+  // Cloud-only: provider + API key + LM model. No STT/TTS/voice or local-model
+  // download (those belong to the ATC plugin, not the trainer — see CONCEPT.md).
+  static const char *backend_keys[] = {"openai", "mistral"};
+  static const char *backend_labels[] = {"OpenAI Cloud", "Mistral Cloud"};
+  constexpr int kBackendCount = 2;
+
+  static const char *openai_models[] = {"gpt-4o-mini", "gpt-4o", "gpt-4.1-mini",
+                                        "gpt-4.1"};
+  static const char *mistral_models[] = {"mistral-large-latest",
+                                         "mistral-small-latest"};
+
+  static char openai_buf[256] = {};
+  static float openai_fb_timer = 0.0f;
+  static char openai_fb_msg[128] = {};
+  static char mistral_buf[256] = {};
+  static float mistral_fb_timer = 0.0f;
+  static char mistral_fb_msg[128] = {};
+
+  ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "AI Backend");
+
+  int backend_sel = 0;
+  {
+    std::string bm = settings::backend_mode();
+    for (int i = 0; i < kBackendCount; ++i) {
+      if (bm == backend_keys[i]) {
+        backend_sel = i;
+        break;
+      }
+    }
+  }
+  if (ImGui::Combo("Provider", &backend_sel, backend_labels, kBackendCount)) {
+    settings::set_backend_mode(backend_keys[backend_sel]);
+    settings::save();
+    // Re-run the loader so the newly selected provider's key/model is picked up.
+    backends::loader::stop();
+    backends::loader::start();
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Cloud LLM for airport difficulty scoring (#5) and "
+                      "post-flight review (#6).");
+
+  ImGui::Spacing();
+  ImGui::Indent();
+  if (std::string(backend_keys[backend_sel]) == "openai") {
+    draw_key_panel(&settings::api_key_saved, &settings::save_api_key,
+                   &settings::delete_api_key, &settings::openai_lm_model,
+                   &settings::set_openai_lm_model, openai_models, 4, openai_buf,
+                   sizeof(openai_buf), openai_fb_timer, openai_fb_msg,
+                   sizeof(openai_fb_msg));
+  } else {
+    draw_key_panel(&settings::mistral_api_key_saved,
+                   &settings::save_mistral_api_key,
+                   &settings::delete_mistral_api_key,
+                   &settings::mistral_lm_model, &settings::set_mistral_lm_model,
+                   mistral_models, 2, mistral_buf, sizeof(mistral_buf),
+                   mistral_fb_timer, mistral_fb_msg, sizeof(mistral_fb_msg));
+  }
+  ImGui::Unindent();
+}
+
+void draw_main_window() {
+  ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "VFR Trainer");
+#ifdef XP_WELLYS_TRAINER_VERSION
+  ImGui::SameLine();
+  ImGui::TextDisabled("v%s", XP_WELLYS_TRAINER_VERSION);
+#endif
+  ImGui::Separator();
+
+  if (ImGui::BeginTabBar("trainer_tabs")) {
+    if (ImGui::BeginTabItem("Flight")) {
+      draw_flight_tab();
+      ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Settings")) {
+      draw_settings_tab();
+      ImGui::EndTabItem();
+    }
+    ImGui::EndTabBar();
   }
 }
 
@@ -333,6 +632,20 @@ int draw_phase_cb(XPLMDrawingPhase, int, void *) {
       XPLMSetWindowIsVisible(window_id, 0);
       XPLMTakeKeyboardFocus(nullptr);
     }
+  }
+
+  // Dynamic XPLM keyboard focus. The capture window only receives key events
+  // while it holds focus, but toggle() never grabs it (so command bindings keep
+  // firing). Mirror ImGui's per-frame WantTextInput onto the XPLM focus state so
+  // the Settings-tab API-key field works, then release focus the moment no text
+  // widget is active.
+  if (window_id && visible) {
+    bool want_text = ImGui::GetIO().WantTextInput;
+    bool have_focus = XPLMHasKeyboardFocus(window_id) != 0;
+    if (want_text && !have_focus)
+      XPLMTakeKeyboardFocus(window_id);
+    else if (!want_text && have_focus)
+      XPLMTakeKeyboardFocus(nullptr);
   }
 
   ImGui::Render();

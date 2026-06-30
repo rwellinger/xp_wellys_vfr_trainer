@@ -81,6 +81,7 @@ add_library(xp_wellys_vfr_trainer MODULE
     src/persistence/settings.cpp
     src/persistence/keychain.cpp
     src/ui/trainer_ui.cpp
+    src/ui/clipboard.mm
     ${IMGUI_SOURCES}
 )
 target_include_directories(xp_wellys_vfr_trainer PRIVATE
@@ -126,6 +127,9 @@ if(APPLE)
         # Security.framework backs persistence/keychain.cpp (API keys in the
         # macOS Keychain).
         "-framework Security"
+        # AppKit (NSPasteboard) backs src/ui/clipboard.mm — the Settings tab's
+        # [Paste] button reads the system clipboard for the API key.
+        "-framework AppKit"
         # libcurl backs the OpenAI / Mistral cloud clients.
         CURL::libcurl
     )
