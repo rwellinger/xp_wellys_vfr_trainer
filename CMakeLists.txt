@@ -55,6 +55,8 @@ add_library(xp_trainer_engine OBJECT
     src/airports/geo.cpp
     src/airports/apt_dat_parser.cpp
     src/airports/airport_db.cpp
+    src/airports/airport_score_cache.cpp
+    src/airports/airport_scorer.cpp
     src/preflight/flight_suggester.cpp
 )
 target_include_directories(xp_trainer_engine PRIVATE

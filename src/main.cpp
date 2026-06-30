@@ -15,6 +15,8 @@
 #include <XPLMUtilities.h>
 
 #include "airports/airport_db.hpp"
+#include "airports/airport_score_cache.hpp"
+#include "airports/airport_scorer.hpp"
 #include "backends/loader.hpp"
 #include "backends/manager.hpp"
 #include "core/logging.hpp"
@@ -60,12 +62,23 @@ static float flight_loop_cb(float, float, int, void *) {
   // crash. Service the async LM callback queue inside an exception boundary.
   try {
     backends::drain_callback_queue();
+    // Drive lazy LLM airport scoring (one call at a time when a backend is
+    // ready); runs even while the window is closed.
+    airports::scorer::pump();
   } catch (const std::exception &e) {
     logging::error("flight_loop_cb threw: %s", e.what());
   } catch (...) {
     logging::error("flight_loop_cb threw an unknown exception");
   }
   return -1.0f; // called every frame
+}
+
+// "provider:model" tag for score provenance, from the current settings.
+static std::string current_model_tag() {
+  const std::string mode = settings::backend_mode();
+  const std::string model =
+      (mode == "mistral") ? settings::mistral_lm_model() : settings::openai_lm_model();
+  return mode + ":" + model;
 }
 
 PLUGIN_API int XPluginStart(char *name, char *sig, char *desc) {
@@ -86,6 +99,11 @@ PLUGIN_API int XPluginStart(char *name, char *sig, char *desc) {
   settings::init();
   backends::init();
   trainer_ui::init();
+
+  // Load the cached LLM difficulty scores (one JSON file in the plugin's data
+  // directory). The scorer fills it lazily as airports show up as suggestions.
+  airports::score_cache::load(settings::get_data_dir() + "/airport_scores.json");
+  airports::scorer::set_model(current_model_tag());
 
   // Load + DACH-filter the apt.dat on a background worker (parsing the ~1 GB
   // file takes ~1.4 s; the main thread must not block). Joined in XPluginStop.
@@ -125,6 +143,9 @@ PLUGIN_API void XPluginStop() {
   }
 
   trainer_ui::stop();
+  // Stop scheduling new scoring and flush the score cache to disk.
+  airports::scorer::stop();
+  airports::score_cache::save();
   // Join the apt.dat loader worker (no worker may outlive XPluginStop).
   airports::airport_db::stop();
   // backends::stop() waits for in-flight workers, drops the LM, and runs

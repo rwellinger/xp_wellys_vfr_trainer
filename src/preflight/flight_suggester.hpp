@@ -67,6 +67,19 @@ struct ScoreResult {
 
 using ScoreFn = std::function<ScoreResult(const Airport &)>;
 
+// A reachable destination (before any difficulty/score filtering) plus its
+// great-circle distance from the departure anchor in km.
+struct Candidate {
+  const Airport *apt = nullptr;
+  double distance_km = 0.0;
+};
+
+// Reachable GA destinations around the anchor (criteria.dep_lat/lon), ignoring
+// difficulty. This is the exact set that must be LLM-scored before a difficulty
+// filter is meaningful, so the plugin enqueues it for background scoring.
+std::vector<Candidate> candidates_in_range(const std::vector<Airport> &airports,
+                                           const Criteria &criteria);
+
 // Nearest GA-suitable airport to the given position, or nullptr when the list
 // holds none. Provided as a fallback for resolving the departure when the nav
 // database is unavailable; suggest_flights does not use it.

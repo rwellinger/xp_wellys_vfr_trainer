@@ -28,12 +28,12 @@ const Airport *find(const std::vector<Airport> &v, const std::string &icao) {
 
 } // namespace
 
-TEST_CASE("DACH filter accepts ED/ET/LS/LO/LZ and rejects others", "[airports]") {
+TEST_CASE("DACH filter accepts ED/ET/LS/LO and rejects others", "[airports]") {
   REQUIRE(is_dach_airport("EDDS"));  // Germany
   REQUIRE(is_dach_airport("ETNG"));  // Germany (military)
   REQUIRE(is_dach_airport("LSZH"));  // Switzerland
   REQUIRE(is_dach_airport("LOWW"));  // Austria
-  REQUIRE(is_dach_airport("LZIB"));  // Czechia/Slovakia region
+  REQUIRE_FALSE(is_dach_airport("LZIB")); // Slovakia — not DACH
   REQUIRE_FALSE(is_dach_airport("LFPG")); // France
   REQUIRE_FALSE(is_dach_airport("LEMD")); // Spain
   REQUIRE_FALSE(is_dach_airport("EGLL")); // UK

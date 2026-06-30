@@ -13,6 +13,8 @@
 #include "ui/trainer_ui.hpp"
 
 #include "airports/airport_db.hpp"
+#include "airports/airport_score_cache.hpp"
+#include "airports/airport_scorer.hpp"
 #include "backends/loader.hpp"
 #include "backends/manager.hpp"
 #include "persistence/settings.hpp"
@@ -177,9 +179,43 @@ const char *country_code(const std::string &icao) {
     return "CH";
   if (p == "LO")
     return "AT";
-  if (p == "LZ")
-    return "SK";
   return "";
+}
+
+const airports::Airport *find_airport(const std::vector<airports::Airport> &v,
+                                      const std::string &icao) {
+  for (const auto &a : v)
+    if (a.icao == icao)
+      return &a;
+  return nullptr;
+}
+
+// Difficulty bucket name + colour, so a bare score (e.g. 4) is readable as a
+// band (Easy 1-3 / Medium 4-6 / Hard 7-10) matching the search criterion.
+const char *difficulty_label(int score) {
+  switch (preflight::difficulty_bucket(score)) {
+  case preflight::Difficulty::EASY:
+    return "Easy";
+  case preflight::Difficulty::MEDIUM:
+    return "Medium";
+  case preflight::Difficulty::HARD:
+    return "Hard";
+  default:
+    return "";
+  }
+}
+
+ImVec4 difficulty_color(int score) {
+  switch (preflight::difficulty_bucket(score)) {
+  case preflight::Difficulty::EASY:
+    return ImVec4(0.4f, 1.0f, 0.4f, 1.0f); // green
+  case preflight::Difficulty::MEDIUM:
+    return ImVec4(1.0f, 0.85f, 0.3f, 1.0f); // yellow
+  case preflight::Difficulty::HARD:
+    return ImVec4(1.0f, 0.5f, 0.4f, 1.0f); // red
+  default:
+    return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+  }
 }
 
 // Current aircraft position from the sim datarefs. The refs are looked up once
@@ -265,10 +301,12 @@ void draw_flight_tab() {
   static int dest_idx = 0;   // ANY, TOWER, AFIS (preflight::DestFacility)
   static int diff_idx = 0;   // ANY, EASY, MEDIUM, HARD
   static int limit_mode = 0; // 0 = distance km, 1 = duration min
-  static int distance_km = 150;
+  static int distance_km = 80;
   static int duration_min = 60;
   static std::vector<preflight::Suggestion> results;
+  static preflight::Criteria searched_criteria; // frozen at last search
   static std::string searched_dep_icao; // departure at last search (for crossing)
+  static bool searched_dep_ok = false;
   static bool searched = false;
 
   static const char *dest_labels[] = {"Any", "Tower", "AFIS"};
@@ -296,43 +334,78 @@ void draw_flight_tab() {
       c.max_distance_km = (static_cast<double>(duration_min) / 60.0) *
                           kAssumedGaGroundspeedKts * 1.852; // kt -> km/h
 
+    searched_criteria = c;
     searched_dep_icao = dep_found ? dep_icao : std::string();
-    results = dep_found
-                  ? preflight::suggest_flights(airports::airport_db::airports(), c)
-                  : std::vector<preflight::Suggestion>{};
+    searched_dep_ok = dep_found;
     searched = true;
   }
 
   if (!searched)
     return;
 
+  // Recompute every frame with the frozen criteria so difficulty updates live
+  // as the background LLM fills the cache without re-click. Enqueue ALL in-range
+  // candidates (not just the displayed results) so the difficulty filter can be
+  // applied to real scores; enqueue + the cache-backed ScoreFn are idempotent.
+  const auto &apts = airports::airport_db::airports();
+  if (searched_dep_ok) {
+    for (const auto &c : preflight::candidates_in_range(apts, searched_criteria))
+      airports::scorer::enqueue_if_missing(*c.apt);
+    results = preflight::suggest_flights(apts, searched_criteria,
+                                         airports::scorer::score_of);
+  } else {
+    results.clear();
+  }
+
   ImGui::Separator();
-  if (searched_dep_icao.empty()) {
+  if (!searched_dep_ok) {
     ImGui::TextColored(warn, "No airport at your position - load a flight first.");
     return;
   }
+
+  const bool filtering = searched_criteria.difficulty != preflight::Difficulty::ANY;
+  if (!backends::lm_ready()) {
+    ImGui::TextColored(warn,
+                       "No API key set - difficulty scores unavailable (Settings tab).");
+  } else if (airports::scorer::busy()) {
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f),
+                       "Scoring %zu airports in background...",
+                       airports::scorer::pending_count());
+  }
+
   if (results.empty()) {
-    ImGui::TextColored(warn, "No destinations within your criteria - relax them.");
+    if (filtering && backends::lm_ready() && airports::scorer::busy())
+      ImGui::TextDisabled("Waiting for scores - matches appear as they are rated.");
+    else
+      ImGui::TextColored(warn, "No destinations within your criteria - relax them.");
     return;
   }
 
-  // The difficulty value is a provisional rule-based placeholder until the LLM
-  // scoring (#5) lands. Make that unmistakable in the table.
-  ImGui::TextDisabled(
-      "Difficulty: ~N = provisional rule-based estimate (real LLM score #5)");
+  ImGui::TextDisabled("Difficulty: ~N = provisional estimate, plain = LLM score");
 
   const char *dep_cc = country_code(searched_dep_icao);
 
   ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
                           ImGuiTableFlags_SizingFixedFit;
-  if (ImGui::BeginTable("suggestions", 5, flags)) {
+  if (ImGui::BeginTable("suggestions", 6, flags)) {
     ImGui::TableSetupColumn("Destination");
     ImGui::TableSetupColumn("km");
     ImGui::TableSetupColumn("Fac");
     ImGui::TableSetupColumn("Ctry");
     ImGui::TableSetupColumn("Diff");
+    // "Why" takes the remaining width and wraps, so the full rationale is shown
+    // (widen the window for more room).
+    ImGui::TableSetupColumn("Why", ImGuiTableColumnFlags_WidthStretch);
     ImGui::TableHeadersRow();
     for (const auto &s : results) {
+      // Resolve the cached entry once: its rationale feeds the "Why" column.
+      const airports::Airport *a = find_airport(apts, s.dest_icao);
+      const airports::score_cache::Entry *entry =
+          a ? airports::score_cache::lookup_entry(
+                  s.dest_icao, airports::scorer::kPromptVersion,
+                  airports::scorer::input_sig(*a))
+            : nullptr;
+
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
       ImGui::Text("%s %s", s.dest_icao.c_str(), s.dest_name.c_str());
@@ -351,9 +424,18 @@ void draw_flight_tab() {
         ImGui::Text("%s", dest_cc);
       ImGui::TableSetColumnIndex(4);
       if (s.difficulty_source == preflight::DifficultySource::PROVISIONAL_RULE)
-        ImGui::TextDisabled("~%d", s.dest_difficulty);
+        ImGui::TextDisabled("~%d %s", s.dest_difficulty,
+                            difficulty_label(s.dest_difficulty));
       else
-        ImGui::Text("%d", s.dest_difficulty);
+        ImGui::TextColored(difficulty_color(s.dest_difficulty), "%d %s",
+                           s.dest_difficulty,
+                           difficulty_label(s.dest_difficulty));
+      ImGui::TableSetColumnIndex(5);
+      // "Why": full LLM rationale, wrapped to the column width. Empty until scored.
+      if (entry && !entry->rationale.empty())
+        ImGui::TextWrapped("%s", entry->rationale.c_str());
+      else
+        ImGui::TextDisabled("-");
     }
     ImGui::EndTable();
   }

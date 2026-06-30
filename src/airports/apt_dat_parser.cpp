@@ -56,7 +56,9 @@ bool is_dach_airport(std::string_view icao) {
   if (icao.size() < 2)
     return false;
   const std::string_view p = icao.substr(0, 2);
-  return p == "ED" || p == "ET" || p == "LS" || p == "LO" || p == "LZ";
+  // DACH only: DE (ED civil + ET military), CH (LS), AT (LO). LZ (Slovakia) is
+  // deliberately excluded.
+  return p == "ED" || p == "ET" || p == "LS" || p == "LO";
 }
 
 int parse_line_code(const std::string &line) {

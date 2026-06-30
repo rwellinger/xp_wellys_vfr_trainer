@@ -124,28 +124,19 @@ Difficulty difficulty_bucket(int value) {
   return Difficulty::HARD;
 }
 
-std::vector<Suggestion> suggest_flights(const std::vector<Airport> &airports,
-                                        const Criteria &criteria,
-                                        const ScoreFn &score,
-                                        size_t max_results) {
-  // The departure is the anchor (criteria.dep_lat/lon) supplied by the plugin
-  // from the aircraft's current airport. The engine just lists reachable
-  // destinations around it; the field at the anchor drops out via the
-  // kMinFlightKm guard (distance ~0).
-
-  // Latitude window for a cheap bbox prefilter (1 deg lat ~ 111 km).
+std::vector<Candidate> candidates_in_range(const std::vector<Airport> &airports,
+                                           const Criteria &criteria) {
+  // Reachable GA destinations around the anchor (criteria.dep_lat/lon),
+  // independent of difficulty/score. The field at the anchor drops out via the
+  // kMinFlightKm guard (distance ~0). This is the set that must be scored before
+  // a difficulty filter can be applied correctly.
   const double lat_window = criteria.max_distance_km / 111.0 + 0.05;
 
-  std::vector<Suggestion> out;
+  std::vector<Candidate> out;
   for (const auto &dest : airports) {
     if (!is_ga_suitable(dest))
       continue;
     if (!dest_facility_ok(criteria.dest_facility, dest.facility))
-      continue;
-    const ScoreResult dest_score = score(dest);
-    // Difficulty applies to the destination (where you operate / land).
-    if (criteria.difficulty != Difficulty::ANY &&
-        difficulty_bucket(dest_score.value) != criteria.difficulty)
       continue;
     if (std::fabs(criteria.dep_lat - dest.lat) > lat_window)
       continue; // bbox guard
@@ -155,11 +146,35 @@ std::vector<Suggestion> suggest_flights(const std::vector<Airport> &airports,
                       1000.0;
     if (km <= kMinFlightKm || km > criteria.max_distance_km)
       continue;
+    out.push_back({&dest, km});
+  }
+  return out;
+}
+
+std::vector<Suggestion> suggest_flights(const std::vector<Airport> &airports,
+                                        const Criteria &criteria,
+                                        const ScoreFn &score,
+                                        size_t max_results) {
+  std::vector<Suggestion> out;
+  for (const auto &cand : candidates_in_range(airports, criteria)) {
+    const Airport &dest = *cand.apt;
+    const ScoreResult dest_score = score(dest);
+    // Difficulty applies to the destination (where you operate / land). When a
+    // difficulty is selected, only TRUST a real LLM score: a placeholder value
+    // must not put an airport into (or out of) a bucket, otherwise the filter
+    // shows wrong results until the background scoring catches up. Unscored
+    // airports are simply hidden until their LLM score arrives.
+    if (criteria.difficulty != Difficulty::ANY) {
+      if (dest_score.source != DifficultySource::LLM_SCORE)
+        continue;
+      if (difficulty_bucket(dest_score.value) != criteria.difficulty)
+        continue;
+    }
 
     Suggestion s;
     s.dest_icao = dest.icao;
     s.dest_name = dest.name;
-    s.distance_km = km;
+    s.distance_km = cand.distance_km;
     s.dest_facility = dest.facility;
     s.dest_difficulty = dest_score.value;
     // Provenance follows the destination's score (the bucket-relevant one).
@@ -175,7 +190,6 @@ std::vector<Suggestion> suggest_flights(const std::vector<Airport> &airports,
     return a.dest_icao < b.dest_icao;
   });
 
-  // 4. Cap.
   if (out.size() > max_results)
     out.resize(max_results);
   return out;

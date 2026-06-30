@@ -44,7 +44,7 @@ Adaptieren, nicht blind kopieren. Abweichungen begründen.
 
 ## Airport-Daten
 - Quelle: X-Plane `apt.dat` (keine externe DB)
-- DACH-Filter: ICAO-Prefixes `ED`, `LS`, `LO`, `ET`, `LZ`
+- DACH-Filter: ICAO-Prefixes `ED`, `ET` (DE), `LS` (CH), `LO` (AT). Kein `LZ` (Slowakei).
 - Caching-Strategie: mit Claude Code klären (SQLite vs. JSON)
 
 ## Wichtige Abhängigkeiten

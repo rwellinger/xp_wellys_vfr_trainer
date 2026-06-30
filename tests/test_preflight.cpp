@@ -145,16 +145,56 @@ TEST_CASE("dest_facility filter keeps only the requested facility", "[preflight]
   }
 }
 
-TEST_CASE("difficulty filter matches destination bucket", "[preflight]") {
+TEST_CASE("candidates_in_range lists in-range GA fields, ignoring difficulty",
+          "[preflight]") {
+  Criteria c;
+  c.dep_lat = 48.0; // on EDAA
+  c.dep_lon = 9.0;
+  c.max_distance_km = 60.0; // only EDAB (~55 km) is in range
+  auto apts = sample(); // keep alive: candidates hold pointers into this vector
+  auto cand = candidates_in_range(apts, c);
+  bool has_edab = false, has_edaa = false;
+  for (const auto &x : cand) {
+    if (x.apt->icao == "EDAB")
+      has_edab = true;
+    if (x.apt->icao == "EDAA")
+      has_edaa = true;
+    REQUIRE(x.distance_km <= 60.0);
+  }
+  REQUIRE(has_edab);
+  REQUIRE_FALSE(has_edaa); // the anchor field itself drops out
+}
+
+TEST_CASE("difficulty filter matches destination bucket (LLM-scored)",
+          "[preflight]") {
   Criteria c;
   c.dep_lat = 48.0; // on EDAA
   c.dep_lon = 9.0;
   c.difficulty = Difficulty::EASY; // EDAB(3) and LOAA(2) are EASY
   c.max_distance_km = 1000.0;
-  auto v = suggest_flights(sample(), c);
+  // Simulate a fully scored set: every airport carries a real LLM score.
+  auto llm = [](const Airport &a) {
+    return ScoreResult{provisional_difficulty(a), DifficultySource::LLM_SCORE};
+  };
+  auto v = suggest_flights(sample(), c, llm);
   REQUIRE_FALSE(v.empty());
-  for (const auto &s : v)
+  for (const auto &s : v) {
     REQUIRE(difficulty_bucket(s.dest_difficulty) == Difficulty::EASY);
+    REQUIRE(s.difficulty_source == DifficultySource::LLM_SCORE);
+  }
+}
+
+TEST_CASE("difficulty filter hides un-scored (provisional) airports",
+          "[preflight]") {
+  Criteria c;
+  c.dep_lat = 48.0; // on EDAA
+  c.dep_lon = 9.0;
+  c.difficulty = Difficulty::EASY;
+  c.max_distance_km = 1000.0;
+  // Default ScoreFn yields provisional placeholders; a difficulty filter must
+  // not trust those, so nothing shows until real scores arrive.
+  auto v = suggest_flights(sample(), c);
+  REQUIRE(v.empty());
 }
 
 TEST_CASE("suggestions are deterministic, provisional and nearest-first",
