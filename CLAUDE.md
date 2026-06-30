@@ -53,6 +53,14 @@ Adaptieren, nicht blind kopieren. Abweichungen begründen.
 - `xp_pilot` → liefert Flugdaten JSON (Koordinaten + Zeitstempel)
 - Beide JSONs werden post-flight zeitkorreliert
 
+## Feature-Split (Abhängigkeiten)
+- **Standalone** (ohne die zwei Plugins nutzbar): Airport-Suche + FMS-Übernahme.
+- **Benötigt beide Plugins** (`xp_wellys_devfr_atc` + `xp_pilot`, installiert UND
+  aktiviert): Post-Flight-Reporting (#6), „GO"/Session-Scoring (#7).
+- Detection + Pfad-Auflösung + Readiness-Gate: `src/dependencies/` (#9),
+  Predicate `deps::all_ready()`. Pfad per Konvention `XPLMGetSystemPath() +
+  fester Output-Unterordner` (kein Plugin exponiert seinen Pfad).
+
 ## Nicht-Ziele
 - Kein Exam-Zwang für Nutzer
 - Keine Flugzeug-Einschränkung

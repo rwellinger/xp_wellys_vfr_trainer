@@ -14,6 +14,7 @@ add_executable(xp_wellys_vfr_trainer_tests
     test_preflight.cpp
     test_airport_score_cache.cpp
     test_airport_scorer.cpp
+    test_dependencies.cpp
 )
 
 target_include_directories(xp_wellys_vfr_trainer_tests PRIVATE

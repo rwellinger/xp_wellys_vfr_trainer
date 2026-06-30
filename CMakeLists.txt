@@ -58,6 +58,7 @@ add_library(xp_trainer_engine OBJECT
     src/airports/airport_score_cache.cpp
     src/airports/airport_scorer.cpp
     src/preflight/flight_suggester.cpp
+    src/dependencies/dependencies.cpp
 )
 target_include_directories(xp_trainer_engine PRIVATE
     ${CMAKE_SOURCE_DIR}/vendor
@@ -82,6 +83,7 @@ add_library(xp_wellys_vfr_trainer MODULE
     src/backends/loader.cpp
     src/persistence/settings.cpp
     src/persistence/keychain.cpp
+    src/dependencies/xplm_plugin_probe.cpp
     src/fms/fms_writer.cpp
     src/ui/trainer_ui.cpp
     src/ui/clipboard.mm

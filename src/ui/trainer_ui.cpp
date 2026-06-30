@@ -17,6 +17,8 @@
 #include "airports/airport_scorer.hpp"
 #include "backends/loader.hpp"
 #include "backends/manager.hpp"
+#include "dependencies/dependencies.hpp"
+#include "dependencies/xplm_plugin_probe.hpp"
 #include "fms/fms_writer.hpp"
 #include "persistence/settings.hpp"
 #include "preflight/flight_suggester.hpp"
@@ -209,6 +211,20 @@ load_selected_into_fms(const std::vector<airports::Airport> &apts,
                                  static_cast<int>(dest->elevation_ft));
 }
 
+// Dependency status (ATC plugin + xp_pilot), re-probed at most ~1/s since
+// XPLMFindPluginBySignature is not free. Shared by the Settings and Flight tabs.
+const std::vector<deps::DependencyState> &cached_dependency_states() {
+  static deps::XplmPluginProbe probe;
+  static std::vector<deps::DependencyState> states;
+  static float last = -1.0f;
+  const float now = get_xp_time();
+  if (last < 0.0f || now - last > 1.0f) {
+    last = now;
+    states = deps::evaluate(probe);
+  }
+  return states;
+}
+
 // Difficulty bucket name + colour, so a bare score (e.g. 4) is readable as a
 // band (Easy 1-3 / Medium 4-6 / Hard 7-10) matching the search criterion.
 const char *difficulty_label(int score) {
@@ -314,6 +330,14 @@ void draw_flight_tab() {
   }
 
   ImGui::Separator();
+
+  // Reporting/scoring gate: airport search + FMS work standalone, but the
+  // post-flight evaluation needs both producer plugins. Surface it; don't block.
+  if (!deps::all_ready(cached_dependency_states())) {
+    ImGui::TextColored(warn, "Post-flight reporting disabled - needs xp_pilot + "
+                             "ATC plugin (see Settings).");
+    ImGui::Separator();
+  }
 
   // ── Destination criteria (rule-based, no LLM) ──────────────────
   ImGui::TextDisabled("To:");
@@ -672,6 +696,27 @@ void draw_settings_tab() {
                    mistral_fb_timer, mistral_fb_msg, sizeof(mistral_fb_msg));
   }
   ImGui::Unindent();
+
+  ImGui::Spacing();
+  ImGui::Separator();
+  ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "Dependencies");
+  ImGui::TextDisabled("Required for post-flight reporting & session scoring "
+                      "(#6/#7). Airport search and FMS work without them.");
+  ImGui::Spacing();
+  const ImVec4 dep_ok(0.4f, 1.0f, 0.4f, 1.0f);
+  const ImVec4 dep_bad(1.0f, 0.6f, 0.2f, 1.0f);
+  for (const auto &d : cached_dependency_states()) {
+    const bool ready = d.installed && d.enabled;
+    ImGui::TextColored(ready ? dep_ok : dep_bad, "[%s] %s",
+                       ready ? "OK" : "X", d.name.c_str());
+    ImGui::Indent();
+    if (!d.installed)
+      ImGui::TextColored(dep_bad, "not installed");
+    else if (!d.enabled)
+      ImGui::TextColored(dep_bad, "installed but disabled");
+    ImGui::TextDisabled("%s", d.output_path.c_str());
+    ImGui::Unindent();
+  }
 }
 
 void draw_main_window() {
