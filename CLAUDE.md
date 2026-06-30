@@ -108,7 +108,9 @@ make lint      # clang-tidy (optional, braucht brew llvm)
 1. ~~Struktur ATC Transmission JSON → in `xp_wellys_vfr_atc` nachschauen~~ → **erledigt** (`docs/atc_transmission_json.md`, Fixture in `testdata/`)
 2. ~~Struktur Flugdaten JSON → in `xp_pilot` nachschauen~~ → **erledigt** (`docs/flight_log_json.md`, Fixture in `testdata/`)
 3. ~~LLM-Client-Abstraktion → analysieren~~ → **erledigt** (übernommen, auf LM reduziert)
-4. **Caching-Strategie Airport-Scores** (SQLite vs. JSON) → noch zu entscheiden
+4. ~~Caching-Strategie Airport-Scores (SQLite vs. JSON)~~ → **entschieden: JSON**
+   (`<plugin>/data/airport_scores.json`, nlohmann schon vendored; Invalidierung
+   über `prompt_version` + `input_sig`). Details: `docs/airport_score_cache.md`.
 5. **Airport-Schwierigkeits-Prompt** → noch auszuarbeiten
 
 ### Roadmap
