@@ -12,8 +12,10 @@
 
 #include "ui/trainer_ui.hpp"
 
+#include "airports/airport_db.hpp"
 #include "backends/manager.hpp"
 #include "persistence/settings.hpp"
+#include "preflight/flight_suggester.hpp"
 
 #include <XPLMDisplay.h>
 #include <XPLMGraphics.h>
@@ -31,6 +33,7 @@
 
 #include <algorithm>
 #include <string>
+#include <vector>
 
 namespace trainer_ui {
 
@@ -104,7 +107,24 @@ void wnd_draw_cb(XPLMWindowID, void *) {
   // Nothing — rendering happens in the draw phase callback.
 }
 
-// ── Placeholder window contents ──────────────────────────────────
+// ── Pre-flight dialog ────────────────────────────────────────────
+
+// Assumed GA groundspeed for converting a max-duration limit to a distance.
+constexpr double kAssumedGaGroundspeedKts = 110.0;
+
+const char *facility_short(airports::FacilityType f) {
+  switch (f) {
+  case airports::FacilityType::TOWERED:
+    return "Tower";
+  case airports::FacilityType::AFIS:
+    return "AFIS";
+  case airports::FacilityType::UNCONTROLLED:
+    return "Unctrl";
+  case airports::FacilityType::UNKNOWN:
+    return "?";
+  }
+  return "?";
+}
 
 void draw_main_window() {
   ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "VFR Trainer");
@@ -113,23 +133,98 @@ void draw_main_window() {
   ImGui::TextDisabled("v%s", XP_WELLYS_TRAINER_VERSION);
 #endif
   ImGui::Separator();
-  ImGui::TextWrapped("Scaffolding build. The gamification layer, airport "
-                     "difficulty scoring and post-flight evaluation are not "
-                     "implemented yet.");
+
+  if (!airports::airport_db::ready()) {
+    ImGui::TextDisabled("Loading DACH airports from apt.dat...");
+    return;
+  }
+
+  ImGui::Text("Pre-flight: %zu DACH airports", airports::airport_db::count());
   ImGui::Spacing();
 
-  ImGui::Text("Backend: %s", settings::backend_mode().c_str());
-  bool ready = backends::lm_ready();
-  ImGui::Text("Language model:");
-  ImGui::SameLine();
-  if (ready)
-    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "ready");
-  else
-    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "not loaded");
+  // ── Criteria (rule-based, no LLM) ──────────────────────────────
+  static int country_idx = 0; // ANY, DE, CH, AT
+  static int atc_idx = 0;     // ANY, T->T, T->AFIS, AFIS->AFIS, AFIS->T
+  static int diff_idx = 0;    // ANY, EASY, MEDIUM, HARD
+  static int limit_mode = 0;  // 0 = distance km, 1 = duration min
+  static int distance_km = 150;
+  static int duration_min = 60;
+  static std::vector<preflight::Suggestion> results;
+  static bool searched = false;
 
-  if (!ready) {
-    ImGui::Spacing();
-    ImGui::TextDisabled("No API key configured for the selected backend.");
+  static const char *country_labels[] = {"Any", "Germany", "Switzerland",
+                                          "Austria"};
+  static const char *atc_labels[] = {"Any", "Tower -> Tower", "Tower -> AFIS",
+                                     "AFIS -> AFIS", "AFIS -> Tower"};
+  static const char *diff_labels[] = {"Any", "Easy", "Medium", "Hard"};
+  static const char *limit_labels[] = {"Max distance (km)",
+                                       "Max duration (min)"};
+
+  ImGui::Combo("Country", &country_idx, country_labels, 4);
+  ImGui::Combo("ATC type", &atc_idx, atc_labels, 5);
+  ImGui::Combo("Difficulty", &diff_idx, diff_labels, 4);
+  ImGui::Combo("Limit by", &limit_mode, limit_labels, 2);
+  if (limit_mode == 0)
+    ImGui::SliderInt("##dist", &distance_km, 10, 400, "%d km");
+  else
+    ImGui::SliderInt("##dur", &duration_min, 10, 240, "%d min");
+
+  if (ImGui::Button("Suggest flights")) {
+    preflight::Criteria c;
+    c.country = static_cast<preflight::Country>(country_idx);
+    c.atc_type = static_cast<preflight::AtcType>(atc_idx);
+    c.difficulty = static_cast<preflight::Difficulty>(diff_idx);
+    if (limit_mode == 0)
+      c.max_distance_km = static_cast<double>(distance_km);
+    else
+      c.max_distance_km = (static_cast<double>(duration_min) / 60.0) *
+                          kAssumedGaGroundspeedKts * 1.852; // kt -> km/h
+    results = preflight::suggest_flights(airports::airport_db::airports(), c);
+    searched = true;
+  }
+
+  if (!searched)
+    return;
+
+  ImGui::Separator();
+  if (results.empty()) {
+    ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f),
+                       "No matching airports - relax your criteria.");
+    return;
+  }
+
+  // The difficulty value is a provisional rule-based placeholder until the LLM
+  // scoring (#5) lands. Make that unmistakable in the table.
+  ImGui::TextDisabled(
+      "Difficulty: ~N = provisional rule-based estimate (real LLM score #5)");
+
+  ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
+                          ImGuiTableFlags_SizingFixedFit;
+  if (ImGui::BeginTable("suggestions", 5, flags)) {
+    ImGui::TableSetupColumn("Departure");
+    ImGui::TableSetupColumn("Destination");
+    ImGui::TableSetupColumn("km");
+    ImGui::TableSetupColumn("ATC");
+    ImGui::TableSetupColumn("Diff");
+    ImGui::TableHeadersRow();
+    for (const auto &s : results) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::Text("%s %s", s.dep_icao.c_str(), s.dep_name.c_str());
+      ImGui::TableSetColumnIndex(1);
+      ImGui::Text("%s %s", s.dest_icao.c_str(), s.dest_name.c_str());
+      ImGui::TableSetColumnIndex(2);
+      ImGui::Text("%.0f", s.distance_km);
+      ImGui::TableSetColumnIndex(3);
+      ImGui::Text("%s->%s", facility_short(s.dep_facility),
+                  facility_short(s.dest_facility));
+      ImGui::TableSetColumnIndex(4);
+      if (s.difficulty_source == preflight::DifficultySource::PROVISIONAL_RULE)
+        ImGui::TextDisabled("~%d", s.dest_difficulty);
+      else
+        ImGui::Text("%d", s.dest_difficulty);
+    }
+    ImGui::EndTable();
   }
 }
 

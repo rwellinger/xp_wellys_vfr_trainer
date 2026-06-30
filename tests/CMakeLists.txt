@@ -11,6 +11,7 @@ add_executable(xp_wellys_vfr_trainer_tests
     test_smoke.cpp
     test_backends.cpp
     test_airports.cpp
+    test_preflight.cpp
 )
 
 target_include_directories(xp_wellys_vfr_trainer_tests PRIVATE
