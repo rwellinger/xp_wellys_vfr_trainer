@@ -54,6 +54,8 @@ add_library(xp_trainer_engine OBJECT
     src/backends/openai_common.cpp
     src/airports/geo.cpp
     src/airports/apt_dat_parser.cpp
+    src/airports/airport_db.cpp
+    src/preflight/flight_suggester.cpp
 )
 target_include_directories(xp_trainer_engine PRIVATE
     ${CMAKE_SOURCE_DIR}/vendor

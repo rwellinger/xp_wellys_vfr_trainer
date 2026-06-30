@@ -115,10 +115,15 @@ make lint      # clang-tidy (optional, braucht brew llvm)
 
 ### Roadmap
 - [x] Projekt-Grundgerüst
-- [~] Airport-Daten-Layer: `apt.dat`-Parser + DACH-Filter erledigt (SDK-frei,
-      `src/airports/`, Tests in `tests/test_airports.cpp` + Fixture
-      `testdata/sample_apt.dat`); Runtime-Laden + Caching offen → #4
-- [ ] Airport-Schwierigkeits-Prompt + Scoring
+- [x] Airport-Daten-Layer: `apt.dat`-Parser + DACH-Filter (`src/airports/`,
+      Tests `tests/test_airports.cpp`); Runtime-Laden via
+      `src/airports/airport_db.cpp` (Hintergrund-Thread, in `main.cpp`
+      verdrahtet). Score-Caching-Format entschieden → `docs/airport_score_cache.md`
+- [x] Pre-Flight-Dialog (#8): regelbasierte Flugvorschlag-Logik
+      `src/preflight/flight_suggester.{hpp,cpp}` + UI in `trainer_ui.cpp`,
+      Tests `tests/test_preflight.cpp`. Difficulty vorerst regelbasierter
+      Platzhalter (`DifficultySource::PROVISIONAL_RULE`), LLM-Score folgt mit #5
+- [ ] Airport-Schwierigkeits-Prompt + Scoring (#5) — ersetzt den Proxy
 - [ ] Post-Flight-Bewertung: Zeitkorrelation ATC-/Flugdaten-JSON + LLM-Urteil
       (JSON-Formate dokumentiert: `docs/`; Zeitkorrelations-Strategie + Producer-Fix:
       `docs/post_flight_correlation.md`)

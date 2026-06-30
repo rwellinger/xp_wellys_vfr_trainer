@@ -14,6 +14,7 @@
 #include <XPLMProcessing.h>
 #include <XPLMUtilities.h>
 
+#include "airports/airport_db.hpp"
 #include "backends/loader.hpp"
 #include "backends/manager.hpp"
 #include "core/logging.hpp"
@@ -23,6 +24,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <exception>
+#include <string>
 
 static XPLMMenuID menu_id = nullptr;
 static int menu_container_idx = -1;
@@ -40,6 +42,17 @@ static int toggle_cmd_handler(XPLMCommandRef, XPLMCommandPhase phase, void *) {
   if (phase == xplm_CommandBegin)
     trainer_ui::toggle();
   return 0;
+}
+
+// Path to the X-Plane Global Airports apt.dat. XPLM_USE_NATIVE_PATHS is enabled
+// in XPluginStart, so XPLMGetSystemPath returns a POSIX path.
+static std::string global_apt_dat_path() {
+  char raw[2048] = {};
+  XPLMGetSystemPath(raw);
+  std::string p(raw);
+  if (!p.empty() && p.back() != '/')
+    p += '/';
+  return p + "Global Scenery/Global Airports/Earth nav data/apt.dat";
 }
 
 static float flight_loop_cb(float, float, int, void *) {
@@ -73,6 +86,10 @@ PLUGIN_API int XPluginStart(char *name, char *sig, char *desc) {
   settings::init();
   backends::init();
   trainer_ui::init();
+
+  // Load + DACH-filter the apt.dat on a background worker (parsing the ~1 GB
+  // file takes ~1.4 s; the main thread must not block). Joined in XPluginStop.
+  airports::airport_db::start_load(global_apt_dat_path());
 
   // Flight loop — drains async LM callbacks every frame.
   XPLMCreateFlightLoop_t loop_params{};
@@ -108,6 +125,8 @@ PLUGIN_API void XPluginStop() {
   }
 
   trainer_ui::stop();
+  // Join the apt.dat loader worker (no worker may outlive XPluginStop).
+  airports::airport_db::stop();
   // backends::stop() waits for in-flight workers, drops the LM, and runs
   // curl_global_cleanup.
   backends::stop();
