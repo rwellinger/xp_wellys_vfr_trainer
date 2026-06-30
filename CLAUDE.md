@@ -18,6 +18,7 @@ Adaptieren, nicht blind kopieren. Abweichungen begründen.
 
 ## Plattform & Toolchain
 - macOS ARM64 (Apple Silicon)
+- X-Plane 12.1+ (FMS-Flugplan-Übernahme nutzt die XPLM410-Multi-FPL-API)
 - C++ Native X-Plane Plugin
 - Miniconda für Python-Hilfsscripts falls nötig
 - Colima für Docker falls nötig

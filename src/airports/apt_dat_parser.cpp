@@ -112,21 +112,48 @@ parse_apt_dat(std::istream &in,
   std::vector<Airport> result;
 
   Airport current;          // airport currently being assembled
-  bool building = false;    // a header was seen and accepted
+  bool building = false;    // a header was seen and is a DACH candidate
   bool has_datum = false;   // 1302 datum_lat/lon seen for current
   double mid_lat_sum = 0.0; // first runway midpoint (position fallback)
   double mid_lon_sum = 0.0;
   bool has_runway_mid = false;
+  int header_code = 0;      // header row code: 1=land, 16=seaplane, 17=heliport
+  std::string header_id;    // apt.dat row-1 identifier (may be a gateway code)
+
+  // Cheap admission test on the row-1 identifier, before the real ICAO is
+  // known. Most airports use their ICAO as the row-1 id, but the X-Plane
+  // Gateway assigns provisional ids ('X' + region + sequence, e.g. XEDF0,
+  // XLS0013) whose real ICAO only appears later in 1302 icao_code. Admit those
+  // by stripping the leading 'X'; the final accept() on the canonical code
+  // decides for real at flush time.
+  auto dach_candidate = [&](const std::string &id) {
+    if (accept(id))
+      return true;
+    if (id.size() > 1 && id[0] == 'X')
+      return accept(std::string_view(id).substr(1));
+    return false;
+  };
 
   auto flush = [&]() {
     if (building) {
-      finalize(current, has_datum, mid_lat_sum, mid_lon_sum, has_runway_mid);
-      result.push_back(std::move(current));
+      // Canonical ICAO: prefer 1302 icao_code (set during assembly), else fall
+      // back to the row-1 id. icao_code is the key X-Plane's nav DB / FMS uses,
+      // so e.g. Mollis resolves as LSZM, not its apt.dat id LSMF.
+      if (current.icao.empty())
+        current.icao = header_id;
+      const bool is_heliport = header_code == 17;
+      const bool is_closed = current.name.find("[X]") != std::string::npos;
+      if (!is_heliport && !is_closed && accept(current.icao)) {
+        finalize(current, has_datum, mid_lat_sum, mid_lon_sum, has_runway_mid);
+        result.push_back(std::move(current));
+      }
     }
     current = Airport{};
     building = false;
     has_datum = false;
     has_runway_mid = false;
+    header_code = 0;
+    header_id.clear();
   };
 
   std::string line;
@@ -139,20 +166,24 @@ parse_apt_dat(std::istream &in,
     const int code = parse_line_code(line);
 
     // Airport header: 1 (land), 16 (seaplane), 17 (heliport). Closes the
-    // previous airport and opens a new one (subject to the accept filter).
+    // previous airport and opens a new one. Heliports and [X]-closed fields are
+    // assembled but dropped at flush(); the DACH/icao filter is also deferred to
+    // flush() so gateway-coded fields (real ICAO in 1302 icao_code) survive.
     if (code == 1 || code == 16 || code == 17) {
       flush();
 
-      // Tokens: 0=code, 1=elevation_ft, 2=deprecated, 3=deprecated, 4=icao,
+      // Tokens: 0=code, 1=elevation_ft, 2=deprecated, 3=deprecated, 4=id,
       // 5+=name.
       std::istringstream iss(line);
-      std::string code_tok, elev_tok, dep1, dep2, icao;
-      iss >> code_tok >> elev_tok >> dep1 >> dep2 >> icao;
-      if (icao.empty() || !accept(icao))
+      std::string code_tok, elev_tok, dep1, dep2, id;
+      iss >> code_tok >> elev_tok >> dep1 >> dep2 >> id;
+      if (id.empty() || !dach_candidate(id))
         continue; // skip this airport's child records until the next header
 
       building = true;
-      current.icao = icao;
+      header_code = code;
+      header_id = id;
+      // current.icao stays empty until 1302 icao_code; flush() falls back to id.
       try {
         current.elevation_ft = std::stof(elev_tok);
       } catch (...) {
@@ -183,6 +214,9 @@ parse_apt_dat(std::istream &in,
         } else if (key == "datum_lon") {
           current.lon = std::stod(value);
           has_datum = true;
+        } else if (key == "icao_code" && !value.empty()) {
+          // Real-world ICAO — overrides the row-1 id as the canonical code.
+          current.icao = to_upper(value);
         }
       } catch (...) {
         // ignore malformed metadata

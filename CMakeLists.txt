@@ -82,6 +82,7 @@ add_library(xp_wellys_vfr_trainer MODULE
     src/backends/loader.cpp
     src/persistence/settings.cpp
     src/persistence/keychain.cpp
+    src/fms/fms_writer.cpp
     src/ui/trainer_ui.cpp
     src/ui/clipboard.mm
     ${IMGUI_SOURCES}
@@ -105,7 +106,9 @@ set_target_properties(xp_wellys_vfr_trainer PROPERTIES
 if(APPLE)
     target_compile_definitions(xp_wellys_vfr_trainer PRIVATE
         APL=1 IBM=0 LIN=0
-        XPLM200=1 XPLM210=1 XPLM300=1 XPLM301=1 XPLM400=1
+        # XPLM410 enables the multi-FPL FMS API (xplm_Fpl_Pilot_Primary,
+        # XPLMSetFMSFlightPlanEntryInfo) used by src/fms — requires X-Plane 12.1+.
+        XPLM200=1 XPLM210=1 XPLM300=1 XPLM301=1 XPLM400=1 XPLM410=1
         XP_WELLYS_TRAINER_VERSION="${VERSION_STRING}"
     )
 

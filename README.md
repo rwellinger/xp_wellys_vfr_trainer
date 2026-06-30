@@ -23,7 +23,7 @@ gefiltert auf den DACH-Raum (ICAO-Prefixes `ED`, `LS`, `LO`, `ET`, `LZ`).
 
 ## Voraussetzungen
 
-- macOS (Apple Silicon oder Intel), X-Plane 12
+- macOS (Apple Silicon oder Intel), X-Plane **12.1+** (die FMS-Übernahme nutzt die XPLM410-Multi-FPL-API)
 - `cmake` ≥ 3.26, ein C++17-Compiler (Apple Clang)
 - `curl`, `unzip` (für `make setup`)
 - optional: `clang-format` / `clang-tidy` aus `brew install llvm` für `make format` / `make lint`

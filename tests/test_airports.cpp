@@ -73,6 +73,46 @@ TEST_CASE("header parse yields icao, name and elevation", "[airports]") {
   REQUIRE(v[0].elevation_ft == Catch::Approx(1270.0f));
 }
 
+TEST_CASE("1302 icao_code overrides the row-1 id as canonical ICAO",
+          "[airports]") {
+  // Mollis: apt.dat row-1 id is LSMF, but the real ICAO (the key X-Plane's nav
+  // DB / FMS uses) is LSZM.
+  std::istringstream in("1 1482 0 0 LSMF Mollis\n"
+                        "1302 icao_code LSZM\n");
+  auto v = parse_apt_dat(in, accept_all);
+  REQUIRE(v.size() == 1);
+  REQUIRE(v[0].icao == "LSZM");
+}
+
+TEST_CASE("gateway placeholder id is admitted; real ICAO comes from icao_code",
+          "[airports]") {
+  // X-Plane Gateway ids like XEDF0 do not match the DACH prefix on their own,
+  // but the field is a DACH airport (EDVD) and must survive the filter.
+  std::istringstream in("1 500 0 0 XEDF0 Uslar\n"
+                        "1302 icao_code EDVD\n");
+  auto v = parse_apt_dat(in, is_dach_airport);
+  REQUIRE(v.size() == 1);
+  REQUIRE(v[0].icao == "EDVD");
+}
+
+TEST_CASE("closed [X] airports are filtered out", "[airports]") {
+  std::istringstream in("1 167 0 0 LSMI [X] Interlaken\n"
+                        "1302 icao_code LSMI\n"
+                        "1 1270 0 0 EDDS Stuttgart\n");
+  auto v = parse_apt_dat(in, accept_all);
+  REQUIRE(v.size() == 1);
+  REQUIRE(v[0].icao == "EDDS"); // the closed field is dropped
+}
+
+TEST_CASE("heliports (row code 17) are filtered out", "[airports]") {
+  std::istringstream in("17 1340 0 0 XLS000W Universitatsspital Zurich\n"
+                        "1302 icao_code LSHZ\n"
+                        "1 1270 0 0 EDDS Stuttgart\n");
+  auto v = parse_apt_dat(in, accept_all);
+  REQUIRE(v.size() == 1);
+  REQUIRE(v[0].icao == "EDDS"); // the heliport is dropped
+}
+
 TEST_CASE("runway parse computes length and reciprocal headings",
           "[airports]") {
   std::istringstream in(

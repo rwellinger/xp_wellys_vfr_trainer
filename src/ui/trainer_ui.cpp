@@ -17,6 +17,7 @@
 #include "airports/airport_scorer.hpp"
 #include "backends/loader.hpp"
 #include "backends/manager.hpp"
+#include "fms/fms_writer.hpp"
 #include "persistence/settings.hpp"
 #include "preflight/flight_suggester.hpp"
 #include "ui/clipboard.hpp"
@@ -190,6 +191,24 @@ const airports::Airport *find_airport(const std::vector<airports::Airport> &v,
   return nullptr;
 }
 
+// Resolve elevations for the departure/destination from the airport DB and
+// inject a minimal dep -> dest plan into the FMS. Returned status is surfaced
+// in the UI (success or a clear error — never a silent fail).
+fms::InjectResult
+load_selected_into_fms(const std::vector<airports::Airport> &apts,
+                       const std::string &dep_icao,
+                       const std::string &dest_icao) {
+  const airports::Airport *dep = find_airport(apts, dep_icao);
+  const airports::Airport *dest = find_airport(apts, dest_icao);
+  if (!dep)
+    return {false, "Departure " + dep_icao + " not in airport database"};
+  if (!dest)
+    return {false, "Destination " + dest_icao + " not in airport database"};
+  return fms::inject_direct_plan(dep_icao, static_cast<int>(dep->elevation_ft),
+                                 dest_icao,
+                                 static_cast<int>(dest->elevation_ft));
+}
+
 // Difficulty bucket name + colour, so a bare score (e.g. 4) is readable as a
 // band (Easy 1-3 / Medium 4-6 / Hard 7-10) matching the search criterion.
 const char *difficulty_label(int score) {
@@ -308,6 +327,9 @@ void draw_flight_tab() {
   static std::string searched_dep_icao; // departure at last search (for crossing)
   static bool searched_dep_ok = false;
   static bool searched = false;
+  static int selected_row = -1;        // chosen suggestion for the FMS button
+  static bool pending_confirm = false; // open the replace-plan modal next frame
+  static fms::InjectResult last_result; // last FMS-load outcome, shown inline
 
   static const char *dest_labels[] = {"Any", "Tower", "AFIS"};
   static const char *diff_labels[] = {"Any", "Easy", "Medium", "Hard"};
@@ -338,6 +360,8 @@ void draw_flight_tab() {
     searched_dep_icao = dep_found ? dep_icao : std::string();
     searched_dep_ok = dep_found;
     searched = true;
+    selected_row = -1; // a fresh result set invalidates the old selection
+    last_result = {};
   }
 
   if (!searched)
@@ -397,7 +421,8 @@ void draw_flight_tab() {
     // (widen the window for more room).
     ImGui::TableSetupColumn("Why", ImGuiTableColumnFlags_WidthStretch);
     ImGui::TableHeadersRow();
-    for (const auto &s : results) {
+    for (int row = 0; row < static_cast<int>(results.size()); ++row) {
+      const auto &s = results[row];
       // Resolve the cached entry once: its rationale feeds the "Why" column.
       const airports::Airport *a = find_airport(apts, s.dest_icao);
       const airports::score_cache::Entry *entry =
@@ -408,6 +433,13 @@ void draw_flight_tab() {
 
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
+      // Whole row is selectable; the chosen destination drives the FMS button.
+      char row_id[16];
+      std::snprintf(row_id, sizeof(row_id), "##r%d", row);
+      if (ImGui::Selectable(row_id, selected_row == row,
+                            ImGuiSelectableFlags_SpanAllColumns))
+        selected_row = row;
+      ImGui::SameLine();
       ImGui::Text("%s %s", s.dest_icao.c_str(), s.dest_name.c_str());
       ImGui::TableSetColumnIndex(1);
       ImGui::Text("%.0f", s.distance_km);
@@ -438,6 +470,60 @@ void draw_flight_tab() {
         ImGui::TextDisabled("-");
     }
     ImGui::EndTable();
+  }
+
+  // ── Load selected destination into the FMS (optional) ──────────
+  // Live re-scoring can shrink `results` under us; drop a stale selection.
+  if (selected_row >= static_cast<int>(results.size()))
+    selected_row = -1;
+
+  ImGui::Separator();
+  if (selected_row < 0) {
+    ImGui::TextDisabled("Select a destination row to load it into the FMS.");
+  } else {
+    const auto &sel = results[selected_row];
+    if (ImGui::Button("Load into FMS")) {
+      // Confirm before clobbering an existing flight plan; inject directly when
+      // the plan is empty.
+      if (fms::primary_entry_count() > 0)
+        pending_confirm = true;
+      else
+        last_result =
+            load_selected_into_fms(apts, searched_dep_icao, sel.dest_icao);
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%s -> %s)", searched_dep_icao.c_str(),
+                        sel.dest_icao.c_str());
+
+    if (pending_confirm) {
+      ImGui::OpenPopup("Replace flight plan?");
+      pending_confirm = false;
+    }
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Replace flight plan?", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+      ImGui::Text("A flight plan is already loaded.\nReplace it with %s -> %s?",
+                  searched_dep_icao.c_str(), sel.dest_icao.c_str());
+      ImGui::Separator();
+      if (ImGui::Button("Replace", ImVec2(120, 0))) {
+        last_result =
+            load_selected_into_fms(apts, searched_dep_icao, sel.dest_icao);
+        ImGui::CloseCurrentPopup();
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Cancel", ImVec2(120, 0)))
+        ImGui::CloseCurrentPopup();
+      ImGui::EndPopup();
+    }
+  }
+
+  if (!last_result.message.empty()) {
+    if (last_result.ok)
+      ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "%s",
+                         last_result.message.c_str());
+    else
+      ImGui::TextColored(warn, "%s", last_result.message.c_str());
   }
 }
 
