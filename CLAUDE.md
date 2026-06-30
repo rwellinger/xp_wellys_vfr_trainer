@@ -105,8 +105,8 @@ make lint      # clang-tidy (optional, braucht brew llvm)
 ```
 
 ## Offene Fragen / nächste Schritte
-1. ~~Struktur ATC Transmission JSON → in `xp_wellys_devfr_atc` nachschauen~~ → **offen**
-2. ~~Struktur Flugdaten JSON → in `xp_pilot` nachschauen~~ → **offen**
+1. ~~Struktur ATC Transmission JSON → in `xp_wellys_vfr_atc` nachschauen~~ → **erledigt** (`docs/atc_transmission_json.md`, Fixture in `testdata/`)
+2. ~~Struktur Flugdaten JSON → in `xp_pilot` nachschauen~~ → **erledigt** (`docs/flight_log_json.md`, Fixture in `testdata/`)
 3. ~~LLM-Client-Abstraktion → analysieren~~ → **erledigt** (übernommen, auf LM reduziert)
 4. **Caching-Strategie Airport-Scores** (SQLite vs. JSON) → noch zu entscheiden
 5. **Airport-Schwierigkeits-Prompt** → noch auszuarbeiten
@@ -116,6 +116,8 @@ make lint      # clang-tidy (optional, braucht brew llvm)
 - [ ] Airport-Daten-Layer: `apt.dat`-Parser, DACH-Filter, Caching
 - [ ] Airport-Schwierigkeits-Prompt + Scoring
 - [ ] Post-Flight-Bewertung: Zeitkorrelation ATC-/Flugdaten-JSON + LLM-Urteil
+      (JSON-Formate dokumentiert: `docs/`; Zeitkorrelations-Strategie + Producer-Fix:
+      `docs/post_flight_correlation.md`)
 - [ ] Gamification-Layer
 
 ## Konventionen (etabliert)
