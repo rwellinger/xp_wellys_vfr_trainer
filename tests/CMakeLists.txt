@@ -10,12 +10,19 @@ add_executable(xp_wellys_vfr_trainer_tests
     ${CATCH2_DIR}/catch_amalgamated.cpp
     test_smoke.cpp
     test_backends.cpp
+    test_airports.cpp
 )
 
 target_include_directories(xp_wellys_vfr_trainer_tests PRIVATE
     ${CATCH2_DIR}
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/vendor
+)
+
+# Lets test_airports.cpp open the real apt.dat excerpt fixture without a
+# hard-coded absolute path.
+target_compile_definitions(xp_wellys_vfr_trainer_tests PRIVATE
+    TESTDATA_DIR="${CMAKE_SOURCE_DIR}/testdata"
 )
 
 # manager.cpp (in the engine OBJECT lib) calls curl_global_init/cleanup, so

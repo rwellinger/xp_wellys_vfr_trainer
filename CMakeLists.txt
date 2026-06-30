@@ -52,6 +52,8 @@ add_library(xp_trainer_engine OBJECT
     src/core/logging.cpp
     src/backends/manager.cpp
     src/backends/openai_common.cpp
+    src/airports/geo.cpp
+    src/airports/apt_dat_parser.cpp
 )
 target_include_directories(xp_trainer_engine PRIVATE
     ${CMAKE_SOURCE_DIR}/vendor
