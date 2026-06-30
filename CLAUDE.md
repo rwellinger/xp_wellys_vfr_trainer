@@ -113,7 +113,9 @@ make lint      # clang-tidy (optional, braucht brew llvm)
 
 ### Roadmap
 - [x] Projekt-Grundgerüst
-- [ ] Airport-Daten-Layer: `apt.dat`-Parser, DACH-Filter, Caching
+- [~] Airport-Daten-Layer: `apt.dat`-Parser + DACH-Filter erledigt (SDK-frei,
+      `src/airports/`, Tests in `tests/test_airports.cpp` + Fixture
+      `testdata/sample_apt.dat`); Runtime-Laden + Caching offen → #4
 - [ ] Airport-Schwierigkeits-Prompt + Scoring
 - [ ] Post-Flight-Bewertung: Zeitkorrelation ATC-/Flugdaten-JSON + LLM-Urteil
       (JSON-Formate dokumentiert: `docs/`; Zeitkorrelations-Strategie + Producer-Fix:
