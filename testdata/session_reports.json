@@ -1,0 +1,18 @@
+{
+  "sessions": {
+    "EDNY_1782898047": {
+      "arrival_icao": "LSZR",
+      "computed_at": "2026-07-01T09:45:07Z",
+      "departure_icao": "EDNY",
+      "execution_rationale": "The flight execution was solid, with a stable approach and a great landing, showing good control and handling throughout the flight.",
+      "execution_score": 9,
+      "model": "openai:gpt-4o-mini",
+      "phraseology_rationale": "The pilot demonstrated good radio discipline with clear initial calls and readbacks, though there was a minor issue with an incomplete readback of the QNH during taxi.",
+      "phraseology_score": 8,
+      "prompt_version": 1,
+      "started_at_epoch": 1782898047,
+      "summary": "Overall, the flight was well-executed with effective communication, though attention to detail in readbacks could be improved. Focus on ensuring all elements are fully repeated in future flights to enhance clarity and compliance."
+    }
+  },
+  "version": 1
+}
