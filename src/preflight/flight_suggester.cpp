@@ -44,6 +44,22 @@ bool dest_facility_ok(DestFacility want, FacilityType dest) {
   return false;
 }
 
+// Does a destination satisfy the ground-control filter? Static apt.dat property
+// (Ground frequency present or not) — no LLM, always evaluable.
+bool ground_ok(GroundFilter want, const Airport &dest) {
+  const bool has_ground =
+      dest.has_frequency(airports::FrequencyType::GROUND);
+  switch (want) {
+  case GroundFilter::ANY:
+    return true;
+  case GroundFilter::WITH_GROUND:
+    return has_ground;
+  case GroundFilter::TOWER_ONLY:
+    return !has_ground;
+  }
+  return true;
+}
+
 } // namespace
 
 const Airport *nearest_ga_airport(const std::vector<Airport> &airports,
@@ -82,6 +98,11 @@ int provisional_difficulty(const Airport &a) {
   if (a.facility == FacilityType::TOWERED)
     score += 3;
   else if (a.facility == FacilityType::AFIS)
+    score += 1;
+
+  // A separate Ground frequency means an extra ground-control handoff.
+  if (a.facility == FacilityType::TOWERED &&
+      a.has_frequency(airports::FrequencyType::GROUND))
     score += 1;
 
   // Elevation as a rough terrain/mountain proxy.
@@ -138,6 +159,8 @@ std::vector<Candidate> candidates_in_range(const std::vector<Airport> &airports,
       continue;
     if (!dest_facility_ok(criteria.dest_facility, dest.facility))
       continue;
+    if (!ground_ok(criteria.ground, dest))
+      continue;
     if (std::fabs(criteria.dep_lat - dest.lat) > lat_window)
       continue; // bbox guard
     const double km = airports::haversine_distance(criteria.dep_lat,
@@ -176,6 +199,7 @@ std::vector<Suggestion> suggest_flights(const std::vector<Airport> &airports,
     s.dest_name = dest.name;
     s.distance_km = cand.distance_km;
     s.dest_facility = dest.facility;
+    s.dest_has_ground = dest.has_frequency(airports::FrequencyType::GROUND);
     s.dest_difficulty = dest_score.value;
     // Provenance follows the destination's score (the bucket-relevant one).
     s.difficulty_source = dest_score.source;

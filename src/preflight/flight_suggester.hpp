@@ -32,6 +32,12 @@ using airports::FacilityType;
 // fields; uncontrolled (UNICOM/CTAF) fields are never an endpoint.
 enum class DestFacility { ANY, TOWER, AFIS };
 
+// Ground-control filter, orthogonal to DestFacility. A separate Ground frequency
+// means an extra ground-control handoff (taxi clearance from Ground, then switch
+// to Tower), so it is both a selectable training filter and a difficulty factor.
+// AFIS fields never have Ground, so WITH_GROUND implicitly selects TOWERED only.
+enum class GroundFilter { ANY, WITH_GROUND, TOWER_ONLY };
+
 // Difficulty bucket. Maps to a 1-10 score: EASY 1-3, MEDIUM 4-6, HARD 7-10.
 enum class Difficulty { ANY, EASY, MEDIUM, HARD };
 
@@ -46,6 +52,7 @@ struct Criteria {
   double dep_lat = 0.0;
   double dep_lon = 0.0;
   DestFacility dest_facility = DestFacility::ANY;
+  GroundFilter ground = GroundFilter::ANY;
   double max_distance_km = 150.0;
   Difficulty difficulty = Difficulty::ANY;
 };
@@ -55,6 +62,7 @@ struct Suggestion {
   std::string dest_name;
   double distance_km = 0.0; // from the departure anchor
   FacilityType dest_facility = FacilityType::UNKNOWN;
+  bool dest_has_ground = false; // separate Ground-control frequency present
   int dest_difficulty = 0; // 1-10, the bucket-relevant value
   DifficultySource difficulty_source = DifficultySource::PROVISIONAL_RULE;
 };

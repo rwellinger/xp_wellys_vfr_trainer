@@ -24,7 +24,7 @@ using airports::Airport;
 
 // Scoring-prompt version. Bump when the prompt/rubric changes so cached scores
 // from the old prompt are recomputed (see docs/airport_score_cache.md).
-constexpr int kPromptVersion = 1;
+constexpr int kPromptVersion = 2;
 
 // Stable signature over exactly the apt.dat fields the prompt consumes. Single
 // source of truth for cache invalidation — must mirror build_user_prompt().

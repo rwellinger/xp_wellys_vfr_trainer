@@ -145,6 +145,71 @@ TEST_CASE("dest_facility filter keeps only the requested facility", "[preflight]
   }
 }
 
+TEST_CASE("ground filter selects fields by Ground-control availability",
+          "[preflight]") {
+  // Two Tower fields near the anchor: one with a separate Ground frequency,
+  // one Tower-only. Plus an AFIS field (which never has Ground).
+  auto with_ground = mk("EDGA", "WithGround", 48.1, 9.0, 1000.0f,
+                        FacilityType::TOWERED, 1500.0f, 2, 3);
+  with_ground.frequencies.push_back({121900u, FrequencyType::GROUND});
+  auto tower_only = mk("EDGB", "TowerOnly", 48.2, 9.0, 1000.0f,
+                      FacilityType::TOWERED, 1500.0f, 2, 3);
+  auto afis = mk("EDGC", "Afis", 48.3, 9.0, 1000.0f, FacilityType::AFIS,
+                1200.0f, 2, 1);
+  std::vector<Airport> v = {with_ground, tower_only, afis};
+
+  Criteria base;
+  base.dep_lat = 48.0;
+  base.dep_lon = 9.0;
+  base.max_distance_km = 1000.0;
+
+  SECTION("WITH_GROUND keeps only fields that have Ground") {
+    Criteria c = base;
+    c.ground = GroundFilter::WITH_GROUND;
+    auto r = suggest_flights(v, c);
+    REQUIRE(has_dest(r, "EDGA"));
+    REQUIRE_FALSE(has_dest(r, "EDGB"));
+    REQUIRE_FALSE(has_dest(r, "EDGC"));
+    for (const auto &s : r)
+      REQUIRE(s.dest_has_ground);
+  }
+  SECTION("TOWER_ONLY excludes fields that have Ground") {
+    Criteria c = base;
+    c.ground = GroundFilter::TOWER_ONLY;
+    auto r = suggest_flights(v, c);
+    REQUIRE_FALSE(has_dest(r, "EDGA"));
+    REQUIRE(has_dest(r, "EDGB"));
+    for (const auto &s : r)
+      REQUIRE_FALSE(s.dest_has_ground);
+  }
+  SECTION("negative: AFIS + WITH_GROUND yields nothing") {
+    Criteria c = base;
+    c.dest_facility = DestFacility::AFIS;
+    c.ground = GroundFilter::WITH_GROUND;
+    auto r = suggest_flights(v, c);
+    REQUIRE(r.empty());
+  }
+  SECTION("default ANY is a no-op: every in-range field remains") {
+    auto r = suggest_flights(v, base);
+    REQUIRE(has_dest(r, "EDGA"));
+    REQUIRE(has_dest(r, "EDGB"));
+    REQUIRE(has_dest(r, "EDGC"));
+  }
+}
+
+TEST_CASE("a Ground frequency raises the provisional difficulty of a Tower field",
+          "[preflight]") {
+  // Equal total frequency count (so the count proxy cancels): with_ground has
+  // 3 Tower + 1 Ground, tower_only has 4 Tower. Only the Ground handoff differs.
+  auto with_ground = mk("EDGA", "WithGround", 48.1, 9.0, 1000.0f,
+                        FacilityType::TOWERED, 1500.0f, 2, 3);
+  with_ground.frequencies.push_back({121900u, FrequencyType::GROUND});
+  auto tower_only = mk("EDGB", "TowerOnly", 48.1, 9.0, 1000.0f,
+                      FacilityType::TOWERED, 1500.0f, 2, 4);
+  REQUIRE(provisional_difficulty(with_ground) ==
+          provisional_difficulty(tower_only) + 1);
+}
+
 TEST_CASE("candidates_in_range lists in-range GA fields, ignoring difficulty",
           "[preflight]") {
   Criteria c;

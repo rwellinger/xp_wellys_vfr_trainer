@@ -133,6 +133,12 @@ make lint      # clang-tidy (optional, braucht brew llvm)
       Tests `tests/test_preflight.cpp`. Difficulty vorerst regelbasierter
       Platzhalter (`DifficultySource::PROVISIONAL_RULE`), LLM-Score folgt mit #5
 - [ ] Airport-Schwierigkeits-Prompt + Scoring (#5) — ersetzt den Proxy
+- [x] Ground-Control-Filter (#11, umgedeutet): statt Multi-Leg „Tower→Boden→Tower"
+      ein Filter auf separate Ground-Frequenz im Pre-Flight (`GroundFilter` in
+      `flight_suggester`, Combo in `trainer_ui.cpp`), plus Ground als Faktor im
+      Difficulty-Score (regelbasiert +1 bei Tower+Ground; LLM-Prompt v2). Multi-Leg
+      verworfen — Handoff läuft automatisch im ATC-Plugin. Tests in
+      `tests/test_preflight.cpp`
 - [x] Post-Flight-Bewertung (#6): Engine-Modul `src/postflight/` (v2-Parser für
       ATC-/Flugdaten-JSON, direkte Epoch-Korrelation `ts`↔`track[].t`, Report-Cache
       `session_reports.json`, LLM-Evaluator mit 2 Sub-Scores + Summary), Post-Flight-Tab

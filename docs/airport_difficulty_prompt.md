@@ -6,8 +6,8 @@ rating per airport, cached in `airport_scores.json`
 response schema. The source of truth is the code
 (`src/airports/airport_scorer.cpp`); keep this file in sync.
 
-- **Prompt version:** `kPromptVersion = 1` (bump on any prompt/rubric change so
-  cached scores recompute).
+- **Prompt version:** `kPromptVersion = 2` (bump on any prompt/rubric change so
+  cached scores recompute; v2 added a separate-Ground-frequency workload factor).
 - **Scale:** integer **1–10** (consistent with `provisional_difficulty()` and
   `difficulty_bucket()`: EASY 1–3, MEDIUM 4–6, HARD 7–10).
 - **Transport:** `backends::lm::respond_json_async` (JSON-object reply).
@@ -41,9 +41,10 @@ DACH region (Germany, Switzerland, Austria). Rate how demanding a given airfield
 is for a VFR pilot on a 1-10 scale: 1 = very easy (quiet AFIS/uncontrolled
 field, flat terrain, long runway), 10 = very demanding (busy controlled airspace
 and/or mountainous, high-elevation, short or tricky runway).
-Weigh: controlled (Tower) vs. AFIS workload; surrounding terrain and elevation
-(mountains, valley approaches); nearby controlled airspace (CTR/TMA) and traffic
-complexity; runway length, surface and count.
+Weigh: controlled (Tower) vs. AFIS workload; a separate Ground-control frequency
+(an extra ground-control handoff, more RT workload); surrounding terrain and
+elevation (mountains, valley approaches); nearby controlled airspace (CTR/TMA)
+and traffic complexity; runway length, surface and count.
 Base the rating primarily on the facts provided. You may use general geographic
 knowledge of the SPECIFIC airfield named to judge terrain and airspace, but do
 NOT invent specific frequencies, procedures or figures; when unsure, stay

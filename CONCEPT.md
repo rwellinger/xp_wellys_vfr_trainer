@@ -48,9 +48,19 @@ löst den nächstgelegenen GA-tauglichen Platz auf (in der Praxis der Platz, an 
 du stehst) und schlägt Ziele im Umkreis vor. Nutzer wählt:
 
 - Ziel-Facility: Beliebig / Tower / AFIS
+- Ground-Control: Beliebig / Mit Ground / Nur Tower — Filter auf separate
+  Ground-Frequenz (z. B. LSZG hat Ground, LSZB nur Tower). Ein Platz mit Ground
+  verlangt einen zusätzlichen Ground-Handoff → anspruchsvoller.
 - Maximale Distanz (km) oder Flugdauer (min)
 - Schwierigkeitsgrad: Einfach / Mittel / Anspruchsvoll
 - Flugzeug: freie Wahl, kein Zwang, kein Exam
+
+Anmerkung zu #11: Die ursprünglich als „Multi-Leg Tower→Boden→Tower" gedachte
+Auswahl wurde verworfen. Der Ground↔Tower-Handoff läuft innerhalb eines Platzes
+automatisch im ATC-Plugin ab (und landet im Transmission-JSON); der Trainer plant
+keine mehrbeinigen Routen. Tragfähig ist stattdessen der obige Ground-Control-
+Filter (statische `apt.dat`-Eigenschaft) plus die Berücksichtigung im
+Schwierigkeits-Score.
 
 Kein Land-Filter (redundant, da Departure = Position).
 

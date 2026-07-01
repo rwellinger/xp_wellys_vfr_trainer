@@ -347,6 +347,7 @@ void draw_flight_tab() {
   // ── Destination criteria (rule-based, no LLM) ──────────────────
   ImGui::TextDisabled("To:");
   static int dest_idx = 0;   // ANY, TOWER, AFIS (preflight::DestFacility)
+  static int ground_idx = 0; // ANY, WITH_GROUND, TOWER_ONLY (preflight::GroundFilter)
   static int diff_idx = 0;   // ANY, EASY, MEDIUM, HARD
   static int limit_mode = 0; // 0 = distance km, 1 = duration min
   static int distance_km = 80;
@@ -361,11 +362,13 @@ void draw_flight_tab() {
   static fms::InjectResult last_result; // last FMS-load outcome, shown inline
 
   static const char *dest_labels[] = {"Any", "Tower", "AFIS"};
+  static const char *ground_labels[] = {"Any", "With Ground", "Tower only"};
   static const char *diff_labels[] = {"Any", "Easy", "Medium", "Hard"};
   static const char *limit_labels[] = {"Max distance (km)",
                                        "Max duration (min)"};
 
   ImGui::Combo("Destination", &dest_idx, dest_labels, 3);
+  ImGui::Combo("Ground control", &ground_idx, ground_labels, 3);
   ImGui::Combo("Difficulty", &diff_idx, diff_labels, 4);
   ImGui::Combo("Limit by", &limit_mode, limit_labels, 2);
   if (limit_mode == 0)
@@ -378,6 +381,7 @@ void draw_flight_tab() {
     c.dep_lat = anchor_lat;
     c.dep_lon = anchor_lon;
     c.dest_facility = static_cast<preflight::DestFacility>(dest_idx);
+    c.ground = static_cast<preflight::GroundFilter>(ground_idx);
     c.difficulty = static_cast<preflight::Difficulty>(diff_idx);
     if (limit_mode == 0)
       c.max_distance_km = static_cast<double>(distance_km);
@@ -473,7 +477,10 @@ void draw_flight_tab() {
       ImGui::TableSetColumnIndex(1);
       ImGui::Text("%.0f", s.distance_km);
       ImGui::TableSetColumnIndex(2);
-      ImGui::Text("%s", facility_short(s.dest_facility));
+      // Append "+G" when a separate Ground-control frequency is present, so the
+      // extra ground handoff (the difficulty factor) is visible at a glance.
+      ImGui::Text("%s%s", facility_short(s.dest_facility),
+                  s.dest_has_ground ? "+G" : "");
       ImGui::TableSetColumnIndex(3);
       // Highlight a border crossing: destination country differs from departure.
       const char *dest_cc = country_code(s.dest_icao);
