@@ -1,7 +1,8 @@
 {
-  "version": 1,
+  "version": 2,
   "flight": {
     "started_at": "2026-06-30T11:35:43",
+    "started_at_epoch": 1782812143,
     "departure_airport": "EDTZ",
     "destination_airport": "EDNY",
     "missing_initial_call": false,
@@ -24,6 +25,7 @@
   "transmissions": [
     {
       "time": "2026-06-30T11:35:43",
+      "ts": 1782812143,
       "transcript": "Konstanz Information Delta Tango Whiskey Romeo Oscar mit einer BN2P am Vorfeld VFR nach Echo Delta Na falsch",
       "quality": 1.0,
       "atc_response": "Delta Tango Whiskey Romeo Oscar, Konstanz Information, Piste 12 in Betrieb, QNH 1020, Rollen auf eigene Verantwortung.",
@@ -44,6 +46,7 @@
     },
     {
       "time": "2026-06-30T11:42:24",
+      "ts": 1782812544,
       "transcript": "Konstanz Information Delta Tango Whiskey Romeo Oscar Verlassen Ihre Frequenz Auf Wiederhören",
       "quality": 1.0,
       "atc_response": "Delta Tango Whiskey Romeo Oscar, Konstanz Information, verstanden, auf Wiederhoeren.",
@@ -64,6 +67,7 @@
     },
     {
       "time": "2026-06-30T11:43:41",
+      "ts": 1782812621,
       "transcript": "Friedrichshafen Tower, Delta Tango Whiskey Romeo Oscar, mit einer BN2P auf 2500 Fuss zur Landung, erbitte Einflugverfahren.",
       "quality": 1.0,
       "atc_response": "Delta Tango Whiskey Romeo Oscar, Friedrichshafen Tower, einfliegen in den Gegenanflug Piste 06, melden Sie Mitte Gegenanflug.",
@@ -84,6 +88,7 @@
     },
     {
       "time": "2026-06-30T11:49:22",
+      "ts": 1782812962,
       "transcript": "Friedrichshafen Turm Delta Tango Whiskey Romeo Oscar Gegenanflug Piste 06",
       "quality": 1.0,
       "atc_response": "",
@@ -104,6 +109,7 @@
     },
     {
       "time": "2026-06-30T11:49:49",
+      "ts": 1782812989,
       "transcript": "Friedrichshafen Turm Delta Tango Whiskey Romeo Oscar Mitte Gegenanflug Piste 06",
       "quality": 1.0,
       "atc_response": "Whiskey Romeo Oscar, Nummer eins, Piste 06, weiter Anflug, melden Sie Endanflug.",
@@ -124,6 +130,7 @@
     },
     {
       "time": "2026-06-30T11:50:58",
+      "ts": 1782813058,
       "transcript": "Friedrichshafen Turm Delta Tango Whiskey Romeo Oscar im Endanflug Piste 06",
       "quality": 1.0,
       "atc_response": "Whiskey Romeo Oscar, Piste 06, Landung frei, Wind ruhig.",
@@ -144,6 +151,7 @@
     },
     {
       "time": "2026-06-30T11:51:13",
+      "ts": 1782813073,
       "transcript": "Piste 06 Landung frei Delta Tango Whiskey Romeo Oscar",
       "quality": 1.0,
       "atc_response": "",
@@ -164,6 +172,7 @@
     },
     {
       "time": "2026-06-30T11:54:55",
+      "ts": 1782813295,
       "transcript": "Friedrichshafen Turm Delta Tango Whiskey Romeo Oscar Piste 06 verlassen",
       "quality": 1.0,
       "atc_response": "Whiskey Romeo Oscar, verstanden, rollen Sie zum GAT-Vorfeld ueber Alpha.",
@@ -184,6 +193,7 @@
     },
     {
       "time": "2026-06-30T11:55:14",
+      "ts": 1782813314,
       "transcript": "Rolle zum Gate Vorfeld über Alpha Delta Tango Whiskey Romeo Oscar",
       "quality": 1.0,
       "atc_response": "",

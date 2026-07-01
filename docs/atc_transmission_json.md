@@ -35,14 +35,18 @@ Source references point into `../xp_wellys_vfr_atc` (template/source plugin):
   the moment the flight file was opened, not each individual transmission's
   wall-clock moment.
 
-> ⚠️ This is the crux for correlating with the xp_pilot flight log, which uses
-> Unix epoch + UTC. See [`post_flight_correlation.md`](./post_flight_correlation.md).
+> ⚠️ The local-time strings alone are not directly comparable to the xp_pilot
+> flight log (Unix epoch + UTC). Since **schema v2** the producer additionally
+> emits UTC-epoch fields (`flight.started_at_epoch`, `transmissions[].ts`) that
+> make correlation a direct integer comparison — see
+> [`post_flight_correlation.md`](./post_flight_correlation.md). The trainer
+> requires v2 and reads only the epoch fields for correlation.
 
 ## Top-level structure
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "flight": { ... },
   "summary": { ... },
   "transmissions": [ { ... }, ... ]
@@ -51,7 +55,7 @@ Source references point into `../xp_wellys_vfr_atc` (template/source plugin):
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `version` | int | Schema version (currently `1`). |
+| `version` | int | Schema version. `2` adds the UTC-epoch fields below; the trainer rejects older files. |
 | `flight` | object | Flight header, see below. |
 | `summary` | object | Aggregate counters, see below. |
 | `transmissions` | array | One object per radio call, see below. |
@@ -61,6 +65,7 @@ Source references point into `../xp_wellys_vfr_atc` (template/source plugin):
 | Field | Type | Notes |
 | --- | --- | --- |
 | `started_at` | string | ISO 8601 local time, frozen at flight open. |
+| `started_at_epoch` | int | **v2.** Unix epoch seconds (UTC) of flight open, from `std::time(nullptr)` — the same clock xp_pilot uses. Correlation anchor. |
 | `departure_airport` | string | ICAO. |
 | `destination_airport` | string\|null | ICAO; set once an inbound call to a different field is seen. |
 | `missing_initial_call` | bool | `true` if a controlled field (Tower/Ground/AFIS) was left airborne without an initial call. Only measured at controlled fields. |
@@ -83,6 +88,7 @@ Source references point into `../xp_wellys_vfr_atc` (template/source plugin):
 | Field | Type | Notes |
 | --- | --- | --- |
 | `time` | string | ISO 8601 local time (frozen at flight open — see above). |
+| `ts` | int | **v2.** Unix epoch seconds (UTC), live per-transmission wall-clock sample from `std::time(nullptr)`. Correlates directly against xp_pilot `track[].t`. |
 | `transcript` | string | Whisper transcription of the pilot's call. |
 | `quality` | float | Whisper transcription quality 0.0–1.0. `< 0.3` → rejected / "say again". |
 | `atc_response` | string | ATC reply text; empty string when no reply (e.g. pure readback). |

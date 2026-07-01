@@ -21,6 +21,8 @@
 #include "backends/manager.hpp"
 #include "core/logging.hpp"
 #include "persistence/settings.hpp"
+#include "postflight/evaluator.hpp"
+#include "postflight/report_cache.hpp"
 #include "ui/trainer_ui.hpp"
 
 #include <cstdint>
@@ -105,6 +107,12 @@ PLUGIN_API int XPluginStart(char *name, char *sig, char *desc) {
   airports::score_cache::load(settings::get_data_dir() + "/airport_scores.json");
   airports::scorer::set_model(current_model_tag());
 
+  // Load cached post-flight session reports (#6). The evaluator writes here when
+  // the user scores a flight; the same provenance tag as the airport scorer.
+  postflight::report_cache::load(settings::get_data_dir() +
+                                 "/session_reports.json");
+  postflight::evaluator::set_model(current_model_tag());
+
   // Load + DACH-filter the apt.dat on a background worker (parsing the ~1 GB
   // file takes ~1.4 s; the main thread must not block). Joined in XPluginStop.
   airports::airport_db::start_load(global_apt_dat_path());
@@ -146,6 +154,8 @@ PLUGIN_API void XPluginStop() {
   // Stop scheduling new scoring and flush the score cache to disk.
   airports::scorer::stop();
   airports::score_cache::save();
+  // Reset the post-flight evaluator (its reports are persisted on each score).
+  postflight::evaluator::stop();
   // Join the apt.dat loader worker (no worker may outlive XPluginStop).
   airports::airport_db::stop();
   // backends::stop() waits for in-flight workers, drops the LM, and runs

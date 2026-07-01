@@ -8,6 +8,15 @@ The post-flight evaluation needs to align two independently produced JSON files
 - **Flight log** — [`flight_log_json.md`](./flight_log_json.md)
   (producer `xp_pilot`).
 
+> ✅ **Status (implemented).** The recommended fix below has landed: the ATC
+> plugin emits schema **v2** with UTC-epoch fields (`transmissions[].ts`,
+> `flight.started_at_epoch`). Correlation is now a **direct integer comparison**
+> against the flight log's `track[].t` / `start_time` — no timezone or DST
+> reconstruction. The trainer's `src/postflight/` implements exactly this and
+> **requires v2** (older local-time-only files are rejected). The
+> "two incompatible time systems" analysis and the interim local→UTC offset
+> approach below are kept for historical context and no longer run.
+
 ## The core problem: two incompatible time systems
 
 | Source | Time fields | Format | Reference |

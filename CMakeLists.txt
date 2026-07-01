@@ -59,6 +59,12 @@ add_library(xp_trainer_engine OBJECT
     src/airports/airport_scorer.cpp
     src/preflight/flight_suggester.cpp
     src/dependencies/dependencies.cpp
+    src/postflight/flight_log.cpp
+    src/postflight/atc_log.cpp
+    src/postflight/correlation.cpp
+    src/postflight/report_cache.cpp
+    src/postflight/evaluator.cpp
+    src/postflight/discovery.cpp
 )
 target_include_directories(xp_trainer_engine PRIVATE
     ${CMAKE_SOURCE_DIR}/vendor

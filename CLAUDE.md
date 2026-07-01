@@ -133,9 +133,12 @@ make lint      # clang-tidy (optional, braucht brew llvm)
       Tests `tests/test_preflight.cpp`. Difficulty vorerst regelbasierter
       Platzhalter (`DifficultySource::PROVISIONAL_RULE`), LLM-Score folgt mit #5
 - [ ] Airport-Schwierigkeits-Prompt + Scoring (#5) — ersetzt den Proxy
-- [ ] Post-Flight-Bewertung: Zeitkorrelation ATC-/Flugdaten-JSON + LLM-Urteil
-      (JSON-Formate dokumentiert: `docs/`; Zeitkorrelations-Strategie + Producer-Fix:
-      `docs/post_flight_correlation.md`)
+- [x] Post-Flight-Bewertung (#6): Engine-Modul `src/postflight/` (v2-Parser für
+      ATC-/Flugdaten-JSON, direkte Epoch-Korrelation `ts`↔`track[].t`, Report-Cache
+      `session_reports.json`, LLM-Evaluator mit 2 Sub-Scores + Summary), Post-Flight-Tab
+      in `trainer_ui.cpp` (Button, `deps::all_ready()`-Gate), Tests
+      `tests/test_postflight.cpp`. Doku: `docs/post_flight_report.md`,
+      `docs/post_flight_correlation.md` (v2 umgesetzt)
 - [ ] Gamification-Layer
 
 ## Konventionen (etabliert)
