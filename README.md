@@ -1,8 +1,9 @@
 # xp_wellys_vfr_trainer
 
-VFR-Trainer mit Gamification-Layer für **X-Plane 12** (macOS, Apple Silicon &
-Intel). Das Plugin motiviert zu echten VFR-Flügen und ATC-Training im
-DACH-Raum, indem es Flüge bewertet und Flugplätze nach Schwierigkeit einordnet.
+VFR-Trainer mit Gamification-Layer für **X-Plane 12** (macOS Apple Silicon &
+Intel, **Windows x64**). Das Plugin motiviert zu echten VFR-Flügen und
+ATC-Training im DACH-Raum, indem es Flüge bewertet und Flugplätze nach
+Schwierigkeit einordnet.
 
 > **Status: Grundgerüst.** Das Plugin lädt in X-Plane, zeigt ein Menü und ein
 > (noch leeres) Fenster und bringt die LLM-Anbindung (OpenAI / Mistral) mit.
@@ -42,6 +43,7 @@ Der Install-Pfad ist:
 ```
 <X-Plane 12>/Resources/available plugins/xp_wellys_vfr_trainer/
 ├── mac_x64/xp_wellys_vfr_trainer.xpl
+├── win_x64/xp_wellys_vfr_trainer.xpl   (aus einem Release / Windows-Artifact)
 └── data/settings.json
 ```
 
@@ -51,14 +53,39 @@ Installation in X-Plane unter *Plugins → Welly's VFR Trainer* das Fenster öff
 Weitere Targets: `make lint`, `make format`, `make clean`, `make distclean`
 (siehe `make help`).
 
+## Windows
+
+Windows wird **cloud-only** voll unterstützt (OpenAI / Mistral über libcurl) —
+funktional identisch zum macOS-x86_64-Slice. Kompiliert wird ausschließlich über
+**GitHub Actions** (`windows-latest`, MSVC + Ninja, statisches libcurl aus vcpkg
+mit Schannel-TLS); ein lokaler Windows-Toolchain ist nicht nötig. Das erzeugte
+`win_x64/xp_wellys_vfr_trainer.xpl` ist ein self-contained DLL-Drop-in ohne
+zusätzliche DLLs.
+
+```bash
+make ci-remote      # stößt den GitHub-Actions-Build an (mac + Windows)
+make win-artifact   # lädt das neueste Windows-.xpl nach dist-win/
+```
+
+Zum Testen ohne Release: `dist-win/win_x64/xp_wellys_vfr_trainer.xpl` (plus
+`data/settings.json`) nach
+`<X-Plane 12>/Resources/plugins/xp_wellys_vfr_trainer/win_x64/` kopieren.
+
+Der **API-Key** liegt unter Windows im **Windows Credential Manager** (DPAPI-
+verschlüsselt), analog zum macOS-Keychain — nie im Klartext auf der Platte.
+
+Ein Release (`v*`-Tag) faltet den macOS-universal- und den Windows-Slice zu einem
+Drop-in-ZIP (`mac_x64/` + `win_x64/`) und schreibt die SkunkCrafts-Updater-
+Kontrolldateien.
+
 ## LLM-Konfiguration
 
 Das Plugin nutzt einen Cloud-LLM-Provider (Nutzerwahl) – kein lokales Modell.
 
 - **Provider** wird über `backend_mode` in `data/settings.json` gewählt:
   `"openai"` (Default) oder `"mistral"`.
-- **API-Keys** werden im **macOS-Keychain** gespeichert (nie in `settings.json`),
-  in separaten Einträgen pro Provider
+- **API-Keys** werden im **macOS-Keychain** (bzw. **Windows Credential Manager**)
+  gespeichert (nie in `settings.json`), in separaten Einträgen pro Provider
   (`com.xp_wellys_vfr_trainer.openai` / `.mistral`), sodass beide parallel
   bestehen können.
 - Modellnamen: `openai_lm_model` (Default `gpt-4o-mini`),
