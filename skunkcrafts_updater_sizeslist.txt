@@ -1,0 +1,9 @@
+data/settings.json|279
+docs/airport_difficulty_prompt.md|3665
+docs/airport_score_cache.md|4869
+docs/atc_transmission_json.md|7793
+docs/flight_log_json.md|4696
+docs/post_flight_correlation.md|4946
+docs/post_flight_report.md|3973
+mac_x64/xp_wellys_vfr_trainer.xpl|3015904
+win_x64/xp_wellys_vfr_trainer.xpl|1904128
