@@ -1,9 +1,9 @@
 # Welly's VFR DACH Trainer
 
-VFR-Trainer mit Gamification-Layer für **X-Plane 12** (macOS Apple Silicon &
-Intel, **Windows x64**). Das Plugin motiviert zu echten VFR-Flügen und
-ATC-Training im DACH-Raum, indem es Flüge bewertet und Flugplätze nach
-Schwierigkeit einordnet.
+VFR-Trainer mit Gamification-Layer für **X-Plane 12**. Offiziell unterstützt auf
+**macOS** (Apple Silicon & Intel) und **Windows x64**. Das Plugin motiviert zu
+echten VFR-Flügen und ATC-Training im DACH-Raum, indem es Flüge bewertet und
+Flugplätze nach Schwierigkeit einordnet.
 
 > **Companion-Plugin:** Der Trainer ist der Gamification-Aufsatz zu
 > **[Welly's ATC](https://github.com/rwellinger/xp_wellys_devfr_atc)** (KI-Sprechfunk-ATC
@@ -25,10 +25,15 @@ gefiltert auf den DACH-Raum (ICAO-Prefixes `ED`, `ET`, `LS`, `LO`).
 
 ## Voraussetzungen
 
-- macOS (Apple Silicon oder Intel), X-Plane **12.1+** (die FMS-Übernahme nutzt die XPLM410-Multi-FPL-API)
-- `cmake` ≥ 3.26, ein C++17-Compiler (Apple Clang)
-- `curl`, `unzip` (für `make setup`)
-- optional: `clang-format` / `clang-tidy` aus `brew install llvm` für `make format` / `make lint`
+- X-Plane **12.1+** (die FMS-Übernahme nutzt die XPLM410-Multi-FPL-API), macOS
+  (Apple Silicon oder Intel) **oder** Windows x64
+- **Nutzer:** kein Toolchain nötig – das Release liefert fertige `.xpl` für beide
+  Plattformen (siehe [Build & Install](#build--install)).
+- **macOS-Build:** `cmake` ≥ 3.26, ein C++17-Compiler (Apple Clang), `curl` +
+  `unzip` (für `make setup`); optional `clang-format` / `clang-tidy` aus
+  `brew install llvm` für `make format` / `make lint`.
+- **Windows-Build:** läuft ausschließlich über GitHub Actions – kein lokaler
+  Windows-Toolchain erforderlich (siehe [Windows](#windows)).
 
 ## Build & Install
 
@@ -56,12 +61,12 @@ Weitere Targets: `make lint`, `make format`, `make clean`, `make distclean`
 
 ## Windows
 
-Windows wird **cloud-only** voll unterstützt (OpenAI / Mistral über libcurl) —
-funktional identisch zum macOS-x86_64-Slice. Kompiliert wird ausschließlich über
-**GitHub Actions** (`windows-latest`, MSVC + Ninja, statisches libcurl aus vcpkg
-mit Schannel-TLS); ein lokaler Windows-Toolchain ist nicht nötig. Das erzeugte
-`win_x64/xp_wellys_vfr_trainer.xpl` ist ein self-contained DLL-Drop-in ohne
-zusätzliche DLLs.
+Windows x64 ist eine **offiziell unterstützte** Plattform – funktional identisch
+zum macOS-Slice (OpenAI / Mistral über libcurl). Kompiliert wird ausschließlich
+über **GitHub Actions** (`windows-latest`, MSVC + Ninja, statisches libcurl aus
+vcpkg mit Schannel-TLS); ein lokaler Windows-Toolchain ist nicht nötig. Das
+erzeugte `win_x64/xp_wellys_vfr_trainer.xpl` ist ein self-contained DLL-Drop-in
+ohne zusätzliche DLLs.
 
 ```bash
 make ci-remote      # stößt den GitHub-Actions-Build an (mac + Windows)
