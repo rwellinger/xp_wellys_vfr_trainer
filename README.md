@@ -1,4 +1,4 @@
-# xp_wellys_vfr_trainer
+# Welly's VFR DACH Trainer
 
 VFR-Trainer mit Gamification-Layer für **X-Plane 12** (macOS Apple Silicon &
 Intel, **Windows x64**). Das Plugin motiviert zu echten VFR-Flügen und
