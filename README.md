@@ -11,12 +11,6 @@ Schwierigkeit einordnet.
 > `xp_pilot` aus. Airport-Suche und FMS-Übernahme laufen standalone; die Post-Flight-Bewertung
 > braucht beide Plugins installiert und aktiviert.
 
-> **Status: Weitgehend fertig.** Airport-Daten-Layer (`apt.dat`-Parser + DACH-Filter),
-> LLM-Schwierigkeits-Scoring mit JSON-Cache, Pre-Flight-Flugvorschläge inkl.
-> FMS-Übernahme und die Post-Flight-Bewertung (Zeitkorrelation der ATC-/Flugdaten-JSONs
-> + LLM-Urteil) sind umgesetzt; Windows wird via CI voll unterstützt. Offen sind nur
-> noch der Gamification-Layer und die Post-Flight-History — siehe [Roadmap](#roadmap).
-
 ## Idee
 
 - **Airport-Schwierigkeits-Score** – jeder Flugplatz bekommt einmalig (gecacht)
