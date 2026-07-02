@@ -3,6 +3,10 @@ SHELL := /bin/bash
 XPLANE_ROOT := /Users/robertw/X-Plane 12
 PLUGIN_DIR  := $(XPLANE_ROOT)/Resources/available plugins/xp_wellys_vfr_trainer
 
+# Staging dir for the SkunkCrafts release tree. Under build/ so `make clean`
+# removes it.
+SKUNK_DIR := build/skunkcrafts-tree
+
 SDK_SENTINEL    := sdk/XPLM/XPLMPlugin.h
 IMGUI_SENTINEL  := vendor/imgui/imgui.h
 JSON_SENTINEL   := vendor/json.hpp
@@ -11,7 +15,7 @@ CATCH2_SENTINEL := vendor/catch2/catch_amalgamated.hpp
 CATCH2_VERSION := 3.15.1
 
 .PHONY: all help setup build install test test-unit lint format clean distclean \
-        ci-remote win-artifact cleanup-tags cleanup-branches cleanup-runs
+        ci-remote win-artifact skunkcrafts cleanup-tags cleanup-branches cleanup-runs
 
 .DEFAULT_GOAL := help
 
@@ -33,6 +37,7 @@ help:
 	@echo ""
 	@echo "  make ci-remote      Trigger the GitHub Actions build (mac + Windows)"
 	@echo "  make win-artifact   Download the latest Windows CI .xpl into dist-win/"
+	@echo "  make skunkcrafts VERSION=x.y.z  Stage a SkunkCrafts release tree + control files"
 	@echo ""
 	@echo "  make cleanup-tags      Prune local tags no longer on origin"
 	@echo "  make cleanup-branches  Prune local branches whose remote is gone"
@@ -180,6 +185,37 @@ win-artifact:
 	@rm -rf dist-win
 	gh run download -n xp_wellys_vfr_trainer-win -D dist-win
 	@echo "Downloaded Windows artifact into dist-win/."
+
+# ── SkunkCrafts Updater release tree ──────────────────────────────────────────
+# Stages a clean, publishable copy of the installed plugin into $(SKUNK_DIR)
+# and generates the SkunkCrafts control files against it. Runtime caches
+# (airport_scores.json, session_reports.json, imgui.ini) are excluded — they
+# are deliberately NOT managed by the updater (untracked files survive every
+# update; kept in sync with IGNORE_GLOBS in tools/skunkcrafts/generate.py).
+# Version comes from VERSION=x.y.z, falling back to VERSION.txt. Publish the
+# contents of $(SKUNK_DIR)/ to the `release` branch the cfg template's
+# `module` URL points at (the CI release job does this automatically on a tag).
+skunkcrafts:
+	@if [ ! -d "$(PLUGIN_DIR)" ]; then \
+	    echo "Plugin not installed at '$(PLUGIN_DIR)'. Run 'make install' first."; exit 1; \
+	fi
+	@VER="$(VERSION)"; \
+	if [ -z "$$VER" ] && [ -f VERSION.txt ]; then VER="$$(cat VERSION.txt)"; fi; \
+	if [ -z "$$VER" ]; then \
+	    echo "No version. Set VERSION=x.y.z or populate VERSION.txt."; exit 1; \
+	fi; \
+	echo "=== Staging SkunkCrafts release tree ($$VER) ==="; \
+	rm -rf "$(SKUNK_DIR)"; mkdir -p "$(SKUNK_DIR)"; \
+	rsync -a \
+	    --exclude 'data/airport_scores.json' \
+	    --exclude 'data/session_reports.json' \
+	    --exclude 'data/imgui.ini' \
+	    --exclude '.DS_Store' \
+	    --exclude 'skunkcrafts_updater*' \
+	    "$(PLUGIN_DIR)/" "$(SKUNK_DIR)/"; \
+	python3 tools/skunkcrafts/generate.py --tree "$(SKUNK_DIR)" --version "$$VER"; \
+	echo "Staged release tree at $(SKUNK_DIR)/ (version $$VER)."; \
+	echo "Publish its contents to the 'release' branch / your update host."
 
 # ── Cleanup (git + CI housekeeping) ────────────────────────────────────────────
 cleanup-tags:
