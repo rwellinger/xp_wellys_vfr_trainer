@@ -44,9 +44,18 @@ public:
     return "unused";
   }
   std::string respond_json(const std::string &, const std::string &) override {
+    // execution_score 15 -> clamped to 10; findings include one valid entry,
+    // one with an out-of-range enum (normalised), and one empty text (dropped).
     return R"({"phraseology_score":8,"phraseology_rationale":"clear calls",)"
            R"("execution_score":15,"execution_rationale":"stable",)"
-           R"("summary":"good circuit"})";
+           R"("summary":"good circuit",)"
+           R"("findings":[)"
+           R"({"phase":"Initial call","category":"phraseology",)"
+           R"("sentiment":"critique","text":"Callsign missing at the end."},)"
+           R"({"phase":"Landing","category":"execution",)"
+           R"("sentiment":"bogus","text":"Smooth touchdown."},)"
+           R"({"phase":"Taxi","category":"phraseology",)"
+           R"("sentiment":"praise","text":""}]})";
   }
 };
 
@@ -149,14 +158,28 @@ TEST_CASE("same_flight matches the fixture pair", "[postflight]") {
   REQUIRE_FALSE(same_flight(atc, other));
 }
 
-TEST_CASE("report_cache round-trips through disk", "[postflight]") {
+TEST_CASE("report_filename is UTC date_time + route", "[postflight]") {
+  report_cache::Entry e;
+  e.departure_icao = "EDTZ";
+  e.arrival_icao = "EDNY";
+  e.started_at_epoch = 1782812143; // 2026-06-30 09:35:43 UTC (11:35 local)
+  REQUIRE(report_cache::report_filename(e) ==
+          "2026-06-30_0935_EDTZ-EDNY_trainingsreport.json");
+
+  // No arrival -> no "-<DEST>" suffix.
+  e.arrival_icao.clear();
+  REQUIRE(report_cache::report_filename(e) ==
+          "2026-06-30_0935_EDTZ_trainingsreport.json");
+}
+
+TEST_CASE("report_cache round-trips through a directory", "[postflight]") {
   namespace fs = std::filesystem;
-  const std::string path =
-      (fs::temp_directory_path() / "wvt_session_reports_test.json").string();
-  fs::remove(path);
+  const fs::path dir = fs::temp_directory_path() / "wvt_reports_test";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
 
   report_cache::clear();
-  report_cache::load(path); // configures the path (file absent -> empty)
+  report_cache::load(dir.string()); // creates the dir; empty to start
 
   report_cache::Entry e;
   e.departure_icao = "EDTZ";
@@ -165,23 +188,41 @@ TEST_CASE("report_cache round-trips through disk", "[postflight]") {
   e.phraseology_score = 8;
   e.execution_score = 7;
   e.summary = "ok";
+  e.findings.push_back({"Downwind", "phraseology", "critique", "Late report."});
+  e.language = "de";
   e.prompt_version = evaluator::kPromptVersion;
   const std::string key = report_cache::make_key("EDTZ", 1782812143);
   report_cache::put(key, e);
   report_cache::save();
 
-  // Reload into a fresh state and confirm the entry survived.
+  // One per-flight file with the expected name landed in the directory.
+  REQUIRE(fs::exists(dir / "2026-06-30_0935_EDTZ-EDNY_trainingsreport.json"));
+
+  // Reload into a fresh state and confirm the entry (incl. findings) survived.
   report_cache::clear();
-  report_cache::load(path);
+  report_cache::load(dir.string());
   const report_cache::Entry *got = report_cache::lookup(key);
   REQUIRE(got != nullptr);
   REQUIRE(got->departure_icao == "EDTZ");
   REQUIRE(got->phraseology_score == 8);
+  REQUIRE(got->language == "de");
+  REQUIRE(got->findings.size() == 1);
+  REQUIRE(got->findings.front().phase == "Downwind");
   REQUIRE(report_cache::latest() != nullptr);
   REQUIRE(report_cache::latest()->started_at_epoch == 1782812143);
 
   report_cache::clear();
-  fs::remove(path);
+  fs::remove_all(dir, ec);
+}
+
+TEST_CASE("system_prompt appends a language directive", "[postflight]") {
+  const std::string de = evaluator::system_prompt("de");
+  const std::string en = evaluator::system_prompt("en");
+  // Base rubric is preserved and prefixed.
+  REQUIRE(de.rfind(evaluator::kSystemPrompt, 0) == 0);
+  REQUIRE(en.rfind(evaluator::kSystemPrompt, 0) == 0);
+  REQUIRE(de.find("in German") != std::string::npos);
+  REQUIRE(en.find("in English") != std::string::npos);
 }
 
 TEST_CASE("evaluator scores a flight via the mock backend", "[postflight]") {
@@ -199,7 +240,7 @@ TEST_CASE("evaluator scores a flight via the mock backend", "[postflight]") {
   REQUIRE(prompt.find("EDTZ -> EDNY") != std::string::npos);
   REQUIRE(prompt.find("BUTTER!") != std::string::npos);
 
-  evaluator::evaluate_async(atc, fl);
+  evaluator::evaluate_async(atc, fl, "de");
   REQUIRE(evaluator::status() == evaluator::Status::Running);
 
   pump_until_settled();
@@ -212,6 +253,13 @@ TEST_CASE("evaluator scores a flight via the mock backend", "[postflight]") {
   REQUIRE(e->execution_score == 10); // 15 clamped to 10
   REQUIRE(e->summary == "good circuit");
   REQUIRE(e->model == "mock:test");
+  REQUIRE(e->language == "de");
+  // Two of three findings survive: empty-text dropped, bogus sentiment ->
+  // "critique".
+  REQUIRE(e->findings.size() == 2);
+  REQUIRE(e->findings.front().phase == "Initial call");
+  REQUIRE(e->findings.front().sentiment == "critique");
+  REQUIRE(e->findings.at(1).sentiment == "critique"); // normalised from "bogus"
 
   backends::register_lm(nullptr);
   evaluator::stop();

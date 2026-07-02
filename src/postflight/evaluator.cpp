@@ -35,13 +35,24 @@ const char *kSystemPrompt =
     "no missing or garbled elements.\n"
     "- execution_score: flight execution — sensible altitudes and pattern "
     "flying, stable approach and the landing quality provided.\n"
+    "Then give a detailed breakdown as a `findings` list: one entry per "
+    "concrete point of praise or criticism, each tied to the flight phase / "
+    "radio call it belongs to (use the phase and intent shown in the timeline, "
+    "e.g. \"Initial call\", \"Downwind report\", \"Leaving frequency\", "
+    "\"Landing\"). Only add a finding when there is something specific to say; "
+    "if nothing is noteworthy, return an empty findings list. At most 6 "
+    "findings.\n"
     "Judge only from the data given; do NOT invent facts, frequencies or "
     "events. Keep each rationale to one or two sentences; the summary to two "
-    "or three sentences of actionable debrief.\n"
+    "or three sentences of an actionable overall verdict; each finding text to "
+    "one sentence.\n"
     "Respond with ONLY a JSON object, no prose:\n"
     "{\"phraseology_score\": <integer 1-10>, \"phraseology_rationale\": "
     "\"<text>\", \"execution_score\": <integer 1-10>, "
-    "\"execution_rationale\": \"<text>\", \"summary\": \"<text>\"}";
+    "\"execution_rationale\": \"<text>\", \"summary\": \"<text>\", "
+    "\"findings\": [{\"phase\": \"<phase/call>\", \"category\": "
+    "\"phraseology\"|\"execution\", \"sentiment\": \"praise\"|\"critique\", "
+    "\"text\": \"<one sentence>\"}]}";
 
 namespace {
 
@@ -81,6 +92,17 @@ std::string hms_utc(std::int64_t ts) {
 int clamp_score(int v) { return std::max(1, std::min(10, v)); }
 
 } // namespace
+
+std::string system_prompt(const std::string &language) {
+  std::string out = kSystemPrompt;
+  if (language == "de")
+    out += "\nWrite all report text — rationales, summary, and every finding's "
+           "phase and text — in German.";
+  else
+    out += "\nWrite all report text — rationales, summary, and every finding's "
+           "phase and text — in English.";
+  return out;
+}
 
 std::string build_prompt(const CorrelatedTimeline &timeline,
                          const FlightLog &flight) {
@@ -134,7 +156,8 @@ std::string build_prompt(const CorrelatedTimeline &timeline,
   return out;
 }
 
-void evaluate_async(const AtcLog &atc, const FlightLog &flight) {
+void evaluate_async(const AtcLog &atc, const FlightLog &flight,
+                    const std::string &language) {
   if (g_status == Status::Running)
     return; // one evaluation at a time
 
@@ -150,19 +173,21 @@ void evaluate_async(const AtcLog &atc, const FlightLog &flight) {
 
   const CorrelatedTimeline timeline = correlate(atc, flight);
   const std::string user_prompt = build_prompt(timeline, flight);
+  const std::string sys_prompt = system_prompt(language);
 
   g_status = Status::Running;
 
   // Snapshot the values the callback needs (it runs on a later frame).
   const std::string key = g_key;
   const std::string model = g_model;
+  const std::string lang = language;
   const std::string dep = atc.flight.departure_airport;
   const std::string arr = flight.arrival_icao;
   const std::int64_t started = atc.flight.started_at_epoch;
 
   backends::lm::respond_json_async(
-      kSystemPrompt, user_prompt,
-      [key, model, dep, arr, started](std::string text, bool success) {
+      sys_prompt, user_prompt,
+      [key, model, lang, dep, arr, started](std::string text, bool success) {
         // Main thread (flight-loop drain).
         if (!success) {
           g_status = Status::Error;
@@ -183,6 +208,26 @@ void evaluate_async(const AtcLog &atc, const FlightLog &flight) {
           e.execution_rationale =
               j.value("execution_rationale", std::string());
           e.summary = j.value("summary", std::string());
+          if (auto it = j.find("findings"); it != j.end() && it->is_array()) {
+            for (const auto &f : *it) {
+              if (!f.is_object())
+                continue;
+              report_cache::Finding fd;
+              fd.phase = f.value("phase", std::string());
+              fd.category = f.value("category", std::string());
+              fd.sentiment = f.value("sentiment", std::string());
+              fd.text = f.value("text", std::string());
+              if (fd.text.empty())
+                continue; // nothing to show
+              // Normalise the enum-ish fields; tolerate anything unexpected.
+              if (fd.category != "phraseology" && fd.category != "execution")
+                fd.category.clear();
+              if (fd.sentiment != "praise" && fd.sentiment != "critique")
+                fd.sentiment = "critique";
+              e.findings.push_back(std::move(fd));
+            }
+          }
+          e.language = lang;
           e.model = model;
           e.computed_at = now_iso();
           e.prompt_version = kPromptVersion;

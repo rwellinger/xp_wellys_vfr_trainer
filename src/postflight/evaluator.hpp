@@ -26,24 +26,30 @@ namespace postflight::evaluator {
 
 // Prompt/rubric version. Bump when the prompt changes so a re-open recomputes
 // instead of showing a report from an older rubric.
-constexpr int kPromptVersion = 1;
+constexpr int kPromptVersion = 2;
 
 enum class Status { Idle, Running, Done, Error };
 
-// System prompt sent with every evaluation (documented in
-// docs/post_flight_report.md).
+// Base system prompt (rubric + JSON contract), language-neutral. Documented in
+// docs/post_flight_report.md.
 extern const char *kSystemPrompt;
+
+// Full system prompt: kSystemPrompt plus a language directive for the report
+// text ("de" -> German, anything else -> English).
+std::string system_prompt(const std::string &language);
 
 // User prompt: compact correlated timeline + flight/landing summary.
 std::string build_prompt(const CorrelatedTimeline &timeline,
                          const FlightLog &flight);
 
-// Correlate + dispatch an async evaluation for one session. Sets status to
-// Running; the reply callback parses the JSON, clamps the scores to 1-10,
-// stores the result (report_cache::put + save) and sets Done or Error. A no-op
-// when an evaluation is already Running. `session_key` is the report_cache key
-// the result will be stored under (also exposed via last_key()).
-void evaluate_async(const AtcLog &atc, const FlightLog &flight);
+// Correlate + dispatch an async evaluation for one session. `language` ("de" /
+// "en") selects the report language. Sets status to Running; the reply callback
+// parses the JSON, clamps the scores to 1-10, stores the result
+// (report_cache::put + save) and sets Done or Error. A no-op when an evaluation
+// is already Running. The report_cache key the result is stored under is exposed
+// via last_key().
+void evaluate_async(const AtcLog &atc, const FlightLog &flight,
+                    const std::string &language);
 
 // Current evaluation status (UI hint).
 Status status();

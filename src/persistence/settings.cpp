@@ -54,6 +54,7 @@ json default_config() {
       {"mistral_lm_model", "mistral-large-latest"},
       {"api_key_saved", false},
       {"mistral_api_key_saved", false},
+      {"report_language", "de"},
       {"debug_logging", false},
       {"window_x", -1.0},
       {"window_y", -1.0},
@@ -163,6 +164,14 @@ std::string mistral_lm_model() {
 }
 void set_mistral_lm_model(const std::string &v) {
   cfg["mistral_lm_model"] = v;
+  save();
+}
+
+std::string report_language() {
+  return cfg.value("report_language", std::string("de"));
+}
+void set_report_language(const std::string &v) {
+  cfg["report_language"] = v;
   save();
 }
 

@@ -33,6 +33,11 @@ void set_openai_lm_model(const std::string &v);
 std::string mistral_lm_model();
 void set_mistral_lm_model(const std::string &v);
 
+// Post-flight report language: "de" or "en". Default "de". Controls the LLM
+// report text and the Post-Flight tab's UI labels.
+std::string report_language();
+void set_report_language(const std::string &v);
+
 // True when an OpenAI / Mistral API key was saved to the Keychain. The keys
 // themselves are never persisted to settings.json — only these flags.
 bool api_key_saved();

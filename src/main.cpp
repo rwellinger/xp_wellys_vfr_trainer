@@ -59,6 +59,17 @@ static std::string global_apt_dat_path() {
   return p + "Global Scenery/Global Airports/Earth nav data/apt.dat";
 }
 
+// Directory the trainer writes its post-flight reports to (#21), mirroring the
+// other plugins' <X-Plane>/Output/<plugin>/ convention.
+static std::string trainer_output_dir() {
+  char raw[2048] = {};
+  XPLMGetSystemPath(raw);
+  std::string p(raw);
+  if (!p.empty() && p.back() != '/')
+    p += '/';
+  return p + "Output/xp_wellys_vfr_trainer";
+}
+
 static float flight_loop_cb(float, float, int, void *) {
   // X-Plane is C; any std::exception that propagates out is a guaranteed
   // crash. Service the async LM callback queue inside an exception boundary.
@@ -107,10 +118,10 @@ PLUGIN_API int XPluginStart(char *name, char *sig, char *desc) {
   airports::score_cache::load(settings::get_data_dir() + "/airport_scores.json");
   airports::scorer::set_model(current_model_tag());
 
-  // Load cached post-flight session reports (#6). The evaluator writes here when
-  // the user scores a flight; the same provenance tag as the airport scorer.
-  postflight::report_cache::load(settings::get_data_dir() +
-                                 "/session_reports.json");
+  // Load cached post-flight session reports (#6/#21). One file per flight under
+  // <X-Plane>/Output/xp_wellys_vfr_trainer/; the evaluator writes here when the
+  // user scores a flight. Same provenance tag as the airport scorer.
+  postflight::report_cache::load(trainer_output_dir());
   postflight::evaluator::set_model(current_model_tag());
 
   // Load + DACH-filter the apt.dat on a background worker (parsing the ~1 GB

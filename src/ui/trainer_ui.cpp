@@ -68,6 +68,14 @@ constexpr float kDefaultH = 300.0f;
 
 float get_xp_time() { return XPLMGetElapsedTime(); }
 
+// Tiny i18n helper for the Post-Flight tab (#21): returns the German or English
+// string per the report-language setting. Both arguments are string literals, so
+// returning the pointer is safe. Scoped to the post-flight debrief — the rest of
+// the UI stays English.
+const char *L(const char *de, const char *en) {
+  return settings::report_language() == "de" ? de : en;
+}
+
 // ── Input glue ───────────────────────────────────────────────────
 
 // Feed the cursor position to ImGui and report whether ImGui wants the mouse
@@ -711,6 +719,28 @@ void draw_settings_tab() {
 
   ImGui::Spacing();
   ImGui::Separator();
+  ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "Post-Flight Report");
+  static const char *lang_keys[] = {"de", "en"};
+  static const char *lang_labels[] = {"Deutsch", "English"};
+  constexpr int kLangCount = 2;
+  int lang_sel = 0;
+  {
+    std::string rl = settings::report_language();
+    for (int i = 0; i < kLangCount; ++i) {
+      if (rl == lang_keys[i]) {
+        lang_sel = i;
+        break;
+      }
+    }
+  }
+  if (ImGui::Combo("Report language", &lang_sel, lang_labels, kLangCount))
+    settings::set_report_language(lang_keys[lang_sel]);
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Language of the post-flight debrief text and the "
+                      "Post-Flight tab labels.");
+
+  ImGui::Spacing();
+  ImGui::Separator();
   ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "Dependencies");
   ImGui::TextDisabled("Required for post-flight reporting & session scoring "
                       "(#6/#7). Airport search and FMS work without them.");
@@ -747,26 +777,36 @@ void draw_postflight_tab() {
   const ImVec4 warn(1.0f, 0.6f, 0.2f, 1.0f);
 
   if (!deps::all_ready(cached_dependency_states())) {
-    ImGui::TextColored(warn, "Post-flight evaluation needs both producer "
-                             "plugins installed and enabled.");
-    ImGui::TextDisabled("xp_wellys_vfr_atc (ATC transmissions) + xp_pilot "
-                        "(flight data). See the Settings tab.");
+    ImGui::TextColored(warn, "%s",
+                       L("Die Nachflug-Bewertung benötigt beide Erzeuger-"
+                         "Plugins installiert und aktiviert.",
+                         "Post-flight evaluation needs both producer "
+                         "plugins installed and enabled."));
+    ImGui::TextDisabled(
+        "%s", L("xp_wellys_vfr_atc (ATC-Funk) + xp_pilot (Flugdaten). "
+                "Siehe Settings-Tab.",
+                "xp_wellys_vfr_atc (ATC transmissions) + xp_pilot "
+                "(flight data). See the Settings tab."));
     ImGui::BeginDisabled();
-    ImGui::Button("Evaluate last flight");
+    ImGui::Button(L("Letzten Flug bewerten", "Evaluate last flight"));
     ImGui::EndDisabled();
     return;
   }
 
   static std::string trigger_error;
 
-  ImGui::TextDisabled("Reads the newest ATC + flight-data JSON from the two "
-                      "plugins' Output folders and asks the LLM for a debrief.");
+  ImGui::TextDisabled(
+      "%s",
+      L("Liest die neuesten ATC- + Flugdaten-JSONs aus den Output-Ordnern der "
+        "beiden Plugins und bittet das LLM um eine Bewertung.",
+        "Reads the newest ATC + flight-data JSON from the two "
+        "plugins' Output folders and asks the LLM for a debrief."));
 
   const bool running = postflight::evaluator::status() ==
                        postflight::evaluator::Status::Running;
   if (running)
     ImGui::BeginDisabled();
-  if (ImGui::Button("Evaluate last flight")) {
+  if (ImGui::Button(L("Letzten Flug bewerten", "Evaluate last flight"))) {
     trigger_error.clear();
     const std::string atc_dir =
         dependency_output_dir("ch.thWelly.wellys_devfr_atc");
@@ -774,19 +814,27 @@ void draw_postflight_tab() {
     const auto atc_file = postflight::newest_json(atc_dir);
     const auto pilot_file = postflight::newest_json(pilot_dir);
     if (!atc_file) {
-      trigger_error = "No ATC transmission JSON found in " + atc_dir;
+      trigger_error =
+          L("Keine ATC-Funk-JSON gefunden in ", "No ATC transmission JSON found in ") +
+          atc_dir;
     } else if (!pilot_file) {
-      trigger_error = "No flight-data JSON found in " + pilot_dir;
+      trigger_error =
+          L("Keine Flugdaten-JSON gefunden in ", "No flight-data JSON found in ") +
+          pilot_dir;
     } else {
       try {
         const postflight::AtcLog atc = postflight::load_atc_log(*atc_file);
         const postflight::FlightLog flight =
             postflight::load_flight_log(*pilot_file);
         if (!postflight::same_flight(atc, flight))
-          trigger_error = "Newest ATC and flight-data files do not describe the "
-                          "same flight (route / time mismatch).";
+          trigger_error =
+              L("Neueste ATC- und Flugdaten-Datei beschreiben nicht denselben "
+                "Flug (Route/Zeit stimmen nicht überein).",
+                "Newest ATC and flight-data files do not describe the "
+                "same flight (route / time mismatch).");
         else
-          postflight::evaluator::evaluate_async(atc, flight);
+          postflight::evaluator::evaluate_async(atc, flight,
+                                                settings::report_language());
       } catch (const std::exception &ex) {
         trigger_error = ex.what();
       }
@@ -795,7 +843,7 @@ void draw_postflight_tab() {
   if (running) {
     ImGui::EndDisabled();
     ImGui::SameLine();
-    ImGui::TextDisabled("Evaluating...");
+    ImGui::TextDisabled("%s", L("Bewerte...", "Evaluating..."));
   }
 
   if (!trigger_error.empty())
@@ -813,27 +861,52 @@ void draw_postflight_tab() {
 
   if (e == nullptr) {
     ImGui::Spacing();
-    ImGui::TextDisabled("No evaluation yet.");
+    ImGui::TextDisabled("%s", L("Noch keine Bewertung.", "No evaluation yet."));
     return;
   }
 
+  const ImVec4 good(0.4f, 1.0f, 0.4f, 1.0f);
+
+  // ── General verdict ("Allgemein-Teil"): route, scores, summary ──
   ImGui::Spacing();
   ImGui::Separator();
   ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "%s -> %s",
                      e->departure_icao.c_str(), e->arrival_icao.c_str());
 
-  const ImVec4 good(0.4f, 1.0f, 0.4f, 1.0f);
-  ImGui::TextColored(good, "Phraseology: %d/10", e->phraseology_score);
+  ImGui::TextColored(good, "%s: %d/10", L("Sprechfunk", "Phraseology"),
+                     e->phraseology_score);
   if (!e->phraseology_rationale.empty())
     ImGui::TextWrapped("%s", e->phraseology_rationale.c_str());
-  ImGui::TextColored(good, "Execution: %d/10", e->execution_score);
+  ImGui::TextColored(good, "%s: %d/10", L("Ausführung", "Execution"),
+                     e->execution_score);
   if (!e->execution_rationale.empty())
     ImGui::TextWrapped("%s", e->execution_rationale.c_str());
   if (!e->summary.empty()) {
     ImGui::Spacing();
-    ImGui::TextDisabled("Summary");
+    ImGui::TextDisabled("%s", L("Gesamturteil", "Summary"));
     ImGui::TextWrapped("%s", e->summary.c_str());
   }
+
+  // ── Detail ("Detail-Teil"): phase-linked findings, only when present ──
+  if (!e->findings.empty()) {
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextDisabled("%s", L("Details", "Details"));
+    const ImVec4 praise(0.4f, 1.0f, 0.4f, 1.0f);
+    for (const auto &f : e->findings) {
+      const bool is_praise = f.sentiment == "praise";
+      const ImVec4 col = is_praise ? praise : warn;
+      const char *mark = is_praise ? "+" : "-";
+      if (!f.phase.empty())
+        ImGui::TextColored(col, "%s %s", mark, f.phase.c_str());
+      else
+        ImGui::TextColored(col, "%s", mark);
+      ImGui::Indent();
+      ImGui::TextWrapped("%s", f.text.c_str());
+      ImGui::Unindent();
+    }
+  }
+
   ImGui::Spacing();
   ImGui::TextDisabled("Model: %s  |  %s", e->model.c_str(),
                       e->computed_at.c_str());

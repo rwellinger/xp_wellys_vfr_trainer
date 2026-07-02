@@ -10,16 +10,27 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
-// Persistent cache of LLM post-flight session reports. One JSON file at
-// <plugin>/data/session_reports.json, keyed by "<departure_icao>_<started_at_epoch>"
-// so re-opening a scored session shows the cached report without another LLM
-// call. Mirrors airports::score_cache (SDK-free, main-thread access only, no
-// locking, atomic temp+rename write).
+// Persistent store of LLM post-flight session reports. Since #21 each report is
+// its own file under <X-Plane>/Output/xp_wellys_vfr_trainer/, named
+// "<YYYY-MM-DD_HHMM>_<DEP>[-<DEST>]_trainingsreport.json" like the other
+// plugins' logs. On load() the directory is scanned into an in-memory map keyed
+// by "<departure_icao>_<started_at_epoch>", so a re-opened session shows the
+// cached report without another LLM call. SDK-free (the directory is passed in
+// from main.cpp), main-thread access only, no locking, atomic temp+rename write.
 namespace postflight::report_cache {
 
-// Bump when the on-disk file layout changes incompatibly (discards the file).
-constexpr int kFileVersion = 1;
+// Bump when the per-file layout changes incompatibly (older files are skipped).
+constexpr int kFileVersion = 2;
+
+// One phase/call-linked detail note ("Detail-Teil"). Rendered only when present.
+struct Finding {
+  std::string phase;     // human-readable phase/call ref, e.g. "Initial call"
+  std::string category;  // "phraseology" | "execution" | ""
+  std::string sentiment; // "praise" | "critique"
+  std::string text;      // one sentence
+};
 
 struct Entry {
   std::string departure_icao;
@@ -29,9 +40,11 @@ struct Entry {
   std::string phraseology_rationale;
   int execution_score = 0; // 1-10
   std::string execution_rationale;
-  std::string summary;
-  std::string model;       // "openai:gpt-4o-mini" — provenance only
-  std::string computed_at; // ISO-8601 UTC
+  std::string summary;             // overall assessment ("Allgemein-Teil")
+  std::vector<Finding> findings;   // phase-linked detail notes ("Detail-Teil")
+  std::string language;            // "de" / "en" the report was generated in
+  std::string model;               // "openai:gpt-4o-mini" — provenance only
+  std::string computed_at;         // ISO-8601 UTC
   int prompt_version = 0;
 };
 
@@ -39,9 +52,15 @@ struct Entry {
 std::string make_key(const std::string &departure_icao,
                      std::int64_t started_at_epoch);
 
-// Set the file path and load it (no-op-safe on a missing file). Parse error or
-// file-version mismatch -> start empty. Replaces any in-memory state.
-void load(const std::string &path);
+// Per-flight file name for an entry (no directory), UTC-based:
+// "<YYYY-MM-DD_HHMM>_<DEP>[-<DEST>]_trainingsreport.json".
+std::string report_filename(const Entry &e);
+
+// Set the directory and scan it for existing reports (created if missing;
+// per-file parse error / version mismatch -> that file is skipped). An empty
+// path keeps the store in memory only (save() becomes a no-op). Replaces any
+// in-memory state.
+void load(const std::string &dir);
 
 // Cached entry for `key`, or nullptr. Valid until the next put()/load()/clear().
 const Entry *lookup(const std::string &key);
@@ -53,10 +72,11 @@ const Entry *latest();
 // Insert / replace (in memory only; call save() to persist).
 void put(const std::string &key, Entry entry);
 
-// Atomically write the cache to the configured path (temp file + rename).
+// Write every in-memory entry to its own per-flight file in the configured
+// directory (atomic temp file + rename each). No-op when no directory is set.
 void save();
 
-// Drop all in-memory state and the configured path (tests / shutdown).
+// Drop all in-memory state and the configured directory (tests / shutdown).
 void clear();
 
 } // namespace postflight::report_cache
