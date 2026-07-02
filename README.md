@@ -8,7 +8,7 @@ Schwierigkeit einordnet.
 > **Companion-Plugin:** Der Trainer ist der Gamification-Aufsatz zu
 > **[Welly's ATC](https://github.com/rwellinger/xp_wellys_devfr_atc)** (KI-Sprechfunk-ATC
 > für X-Plane 12). Er wertet dessen ATC-Transmissions zusammen mit den Flugdaten von
-> `xp_pilot` aus. Airport-Suche und FMS-Übernahme laufen standalone; die Post-Flight-Bewertung
+> **[`xp_pilot`](https://github.com/rwellinger/xp_pilot)** aus. Airport-Suche und FMS-Übernahme laufen standalone; die Post-Flight-Bewertung
 > braucht beide Plugins installiert und aktiviert.
 
 ## Idee
