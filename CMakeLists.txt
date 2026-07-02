@@ -6,6 +6,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(BUILD_TESTS "Build Catch2 unit tests" ON)
 
+# ── Windows-wide compile definitions ─────────────────────────────────────────
+# libcurl (and wincred.h in keychain.cpp) drag in <windows.h>. NOMINMAX keeps
+# the min/max macros from clobbering std::min/max; WIN32_LEAN_AND_MEAN avoids
+# the WinSock1/2 clash; _USE_MATH_DEFINES exposes M_PI etc. under MSVC.
+if(WIN32)
+    add_compile_definitions(
+        NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS _USE_MATH_DEFINES)
+endif()
+
 # ── ccache (optional) ────────────────────────────────────────────────────────
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM)
@@ -69,6 +78,10 @@ add_library(xp_trainer_engine OBJECT
 target_include_directories(xp_trainer_engine PRIVATE
     ${CMAKE_SOURCE_DIR}/vendor
     ${CMAKE_SOURCE_DIR}/src
+    # openai_common.cpp includes <curl/curl.h>. On Windows vcpkg exposes the
+    # curl headers only through the imported target, not a system path, so the
+    # engine OBJECT lib must pull them from CURL::libcurl explicitly.
+    $<TARGET_PROPERTY:CURL::libcurl,INTERFACE_INCLUDE_DIRECTORIES>
 )
 target_compile_definitions(xp_trainer_engine PRIVATE
     XP_WELLYS_TRAINER_VERSION="${VERSION_STRING}"
@@ -92,9 +105,16 @@ add_library(xp_wellys_vfr_trainer MODULE
     src/dependencies/xplm_plugin_probe.cpp
     src/fms/fms_writer.cpp
     src/ui/trainer_ui.cpp
-    src/ui/clipboard.mm
     ${IMGUI_SOURCES}
 )
+
+# Platform clipboard bridge: NSPasteboard (.mm) on macOS, Win32 clipboard on
+# Windows. The .mm must never reach MSVC (no ObjC++ frontend).
+if(APPLE)
+    target_sources(xp_wellys_vfr_trainer PRIVATE src/ui/clipboard.mm)
+elseif(WIN32)
+    target_sources(xp_wellys_vfr_trainer PRIVATE src/ui/clipboard_win.cpp)
+endif()
 target_include_directories(xp_wellys_vfr_trainer PRIVATE
     ${CMAKE_SOURCE_DIR}/sdk
     ${CMAKE_SOURCE_DIR}/sdk/XPLM
@@ -150,6 +170,27 @@ if(APPLE)
     set_target_properties(xp_wellys_vfr_trainer PROPERTIES
         BUILD_WITH_INSTALL_RPATH FALSE
         INSTALL_RPATH "@loader_path"
+    )
+
+elseif(WIN32)
+    target_compile_definitions(xp_wellys_vfr_trainer PRIVATE
+        APL=0 IBM=1 LIN=0
+        XPLM200=1 XPLM210=1 XPLM300=1 XPLM301=1 XPLM400=1 XPLM410=1
+        XP_WELLYS_TRAINER_VERSION="${VERSION_STRING}"
+    )
+    # /utf-8: the sources are UTF-8; MSVC otherwise misreads non-ASCII literals.
+    target_compile_options(xp_wellys_vfr_trainer PRIVATE /W3 /utf-8)
+
+    set(SDK_WIN_LIBS "${CMAKE_SOURCE_DIR}/sdk/Libraries/Win")
+    target_link_libraries(xp_wellys_vfr_trainer PRIVATE
+        "${SDK_WIN_LIBS}/XPLM_64.lib"
+        "${SDK_WIN_LIBS}/XPWidgets_64.lib"
+        opengl32
+        Ws2_32   # sockets for libcurl
+        Crypt32  # Schannel TLS cert store (static curl)
+        Bcrypt   # CNG RNG for curl
+        Advapi32 # Credential Manager (persistence/keychain.cpp)
+        CURL::libcurl
     )
 endif()
 

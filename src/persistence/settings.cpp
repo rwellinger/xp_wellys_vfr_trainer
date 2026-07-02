@@ -16,13 +16,28 @@
 #include <json.hpp>
 
 #include <fstream>
+#if defined(_WIN32)
+#include <direct.h> // _mkdir (no mode arg)
+#else
 #include <sys/stat.h>
+#endif
 
 using json = nlohmann::json;
 
 namespace settings {
 
 namespace {
+
+// Create a directory if it does not exist. POSIX mkdir takes a mode; the
+// Windows CRT _mkdir does not. Failure (incl. "already exists") is ignored
+// here — callers proceed to the file open which surfaces any real problem.
+int make_dir(const char *path) {
+#if defined(_WIN32)
+  return _mkdir(path);
+#else
+  return mkdir(path, 0755);
+#endif
+}
 
 // Mistral keys live in a parallel Keychain entry so both providers can
 // persist at once and a backend-mode flip never requires re-pasting a key.
@@ -79,7 +94,7 @@ void init() {
   else
     data_dir_path = "data";
 
-  mkdir(data_dir_path.c_str(), 0755);
+  make_dir(data_dir_path.c_str());
 
   std::string json_path = data_dir_path + "/settings.json";
   std::ifstream in(json_path);
