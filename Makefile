@@ -11,7 +11,8 @@ CATCH2_SENTINEL := vendor/catch2/catch_amalgamated.hpp
 CATCH2_VERSION := 3.15.1
 
 .PHONY: all help setup build install test test-unit lint format clean distclean \
-        ci-remote win-artifact cleanup-tags cleanup-branches cleanup-runs
+        ci-remote win-artifact release release-build \
+        cleanup-tags cleanup-branches cleanup-runs
 
 .DEFAULT_GOAL := help
 
@@ -33,6 +34,9 @@ help:
 	@echo ""
 	@echo "  make ci-remote      Trigger the GitHub Actions build (mac + Windows)"
 	@echo "  make win-artifact   Download the latest Windows CI .xpl into dist-win/"
+	@echo ""
+	@echo "  make release VERSION=x.y.z  Bump VERSION.txt, commit, tag v<ver> + push (triggers CI release)"
+	@echo "  make release-build          Local universal build with the version from VERSION.txt"
 	@echo ""
 	@echo "  make cleanup-tags      Prune local tags no longer on origin"
 	@echo "  make cleanup-branches  Prune local branches whose remote is gone"
@@ -160,6 +164,35 @@ lint: $(SDK_SENTINEL) $(IMGUI_SENTINEL) $(JSON_SENTINEL) $(CATCH2_SENTINEL)
 	@# the macOS toolchain.
 	clang-tidy -p build-lint --extra-arg="-isysroot" --extra-arg="$(shell xcrun --show-sdk-path)" \
 	    $(shell find src -name '*.cpp' ! -name '*_win.cpp')
+
+# ── Release ─────────────────────────────────────────────────────────────────────
+# Cut a release: bump VERSION.txt, commit, tag v<VERSION> and push. The tag push
+# triggers the CI `release` job (.github/workflows/build.yml), which builds both
+# slices, folds them into the drop-in ZIP (mac_x64/ + win_x64/), generates the
+# SkunkCrafts control files and publishes the GitHub release + `release` branch.
+release:
+	@if [ -z "$(VERSION)" ]; then \
+	    echo "Usage: make release VERSION=1.2.1"; exit 1; \
+	fi
+	@if ! git diff --quiet || ! git diff --cached --quiet; then \
+	    echo "Uncommitted changes present. Commit or stash first."; exit 1; \
+	fi
+	@if [ -n "$$(git ls-files --others --exclude-standard)" ]; then \
+	    echo "Untracked files present. Commit or clean up first."; exit 1; \
+	fi
+	@echo "$(VERSION)" > VERSION.txt
+	@git add VERSION.txt
+	@git commit -m "release $(VERSION)"
+	@git push origin main
+	@git tag -a "v$(VERSION)" -m "Release $(VERSION)"
+	@git push origin "v$(VERSION)"
+	@echo "Released v$(VERSION) and pushed tag to origin."
+
+# Local universal release build. The trainer bakes the version straight from
+# VERSION.txt (no separate -DRELEASE flag), so this is just `make build` — kept
+# as a named target to mirror the ATC workflow and document intent.
+release-build: build
+	@echo "Done. Universal release build with version from VERSION.txt."
 
 # ── CI (Windows via GitHub Actions) ────────────────────────────────────────────
 # GitHub Actions is the Windows compiler — there is no local MSVC toolchain.
