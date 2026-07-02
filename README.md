@@ -5,6 +5,12 @@ Intel, **Windows x64**). Das Plugin motiviert zu echten VFR-Flügen und
 ATC-Training im DACH-Raum, indem es Flüge bewertet und Flugplätze nach
 Schwierigkeit einordnet.
 
+> **Companion-Plugin:** Der Trainer ist der Gamification-Aufsatz zu
+> **[Welly's ATC](https://github.com/rwellinger/xp_wellys_devfr_atc)** (KI-Sprechfunk-ATC
+> für X-Plane 12). Er wertet dessen ATC-Transmissions zusammen mit den Flugdaten von
+> `xp_pilot` aus. Airport-Suche und FMS-Übernahme laufen standalone; die Post-Flight-Bewertung
+> braucht beide Plugins installiert und aktiviert.
+
 > **Status: Weitgehend fertig.** Airport-Daten-Layer (`apt.dat`-Parser + DACH-Filter),
 > LLM-Schwierigkeits-Scoring mit JSON-Cache, Pre-Flight-Flugvorschläge inkl.
 > FMS-Übernahme und die Post-Flight-Bewertung (Zeitkorrelation der ATC-/Flugdaten-JSONs
