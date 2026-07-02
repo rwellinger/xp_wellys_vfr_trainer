@@ -5,10 +5,11 @@ Intel, **Windows x64**). Das Plugin motiviert zu echten VFR-Flügen und
 ATC-Training im DACH-Raum, indem es Flüge bewertet und Flugplätze nach
 Schwierigkeit einordnet.
 
-> **Status: Grundgerüst.** Das Plugin lädt in X-Plane, zeigt ein Menü und ein
-> (noch leeres) Fenster und bringt die LLM-Anbindung (OpenAI / Mistral) mit.
-> Der Gamification-Layer, das Airport-Scoring und die Post-Flight-Bewertung
-> sind noch nicht implementiert — siehe [Roadmap](#roadmap).
+> **Status: Weitgehend fertig.** Airport-Daten-Layer (`apt.dat`-Parser + DACH-Filter),
+> LLM-Schwierigkeits-Scoring mit JSON-Cache, Pre-Flight-Flugvorschläge inkl.
+> FMS-Übernahme und die Post-Flight-Bewertung (Zeitkorrelation der ATC-/Flugdaten-JSONs
+> + LLM-Urteil) sind umgesetzt; Windows wird via CI voll unterstützt. Offen sind nur
+> noch der Gamification-Layer und die Post-Flight-History — siehe [Roadmap](#roadmap).
 
 ## Idee
 
@@ -20,7 +21,7 @@ Schwierigkeit einordnet.
 - **Kein Live-LLM** für Airport-Suche oder -Filterung – nur die beiden Fälle oben.
 
 Datenquelle für Flugplätze ist die X-Plane-`apt.dat` (keine externe DB),
-gefiltert auf den DACH-Raum (ICAO-Prefixes `ED`, `LS`, `LO`, `ET`, `LZ`).
+gefiltert auf den DACH-Raum (ICAO-Prefixes `ED`, `ET`, `LS`, `LO`).
 
 ## Voraussetzungen
 
@@ -129,10 +130,26 @@ src/
 │   ├── mistral_lm.*          # Mistral /v1/chat/completions
 │   ├── openai_common.*       # provider-agnostische Helfer
 │   └── loader.*              # Provider-Auswahl + LM-Registrierung
+├── airports/
+│   ├── apt_dat_parser.*      # apt.dat-Parser + DACH-Filter
+│   ├── airport_db.*          # In-Memory-DB (Background-Load)
+│   ├── airport_scorer.*      # LLM-Schwierigkeits-Scoring (Batch)
+│   ├── airport_score_cache.* # JSON-Cache (prompt_version + input_sig)
+│   └── geo.*                 # Großkreis-Distanz
+├── preflight/
+│   └── flight_suggester.*    # regelbasierte Flugvorschläge + Ground-Filter
+├── postflight/
+│   ├── discovery.*           # findet neueste ATC-/Flugdaten-JSONs
+│   ├── atc_log.* flight_log.* # JSON-Parser
+│   ├── correlation.*         # Zeitkorrelation ts <-> track[].t
+│   ├── evaluator.*           # LLM-Urteil (Sub-Scores + Summary)
+│   └── report_cache.*        # persistente Trainingsreports
 ├── persistence/
 │   ├── settings.*            # settings.json I/O
-│   └── keychain.*            # API-Keys im macOS-Keychain
-└── ui/trainer_ui.*           # ImGui-Fenster (Platzhalter)
+│   └── keychain.*            # API-Keys (macOS-Keychain / Win Credential Manager)
+└── ui/
+    ├── trainer_ui.*          # ImGui-Fenster (Pre-/Post-Flight-Tabs)
+    └── clipboard.*           # Zwischenablage (mm = macOS, _win = Windows)
 tests/                        # Catch2-Unit-Tests gegen xp_trainer_engine
 data/settings.json            # Default-Einstellungen
 ```
@@ -140,10 +157,13 @@ data/settings.json            # Default-Einstellungen
 ## Roadmap
 
 - [x] Projekt-Grundgerüst (Build, Plugin-Skeleton, LLM-Abstraktion, UI-Platzhalter)
-- [ ] Airport-Daten-Layer: `apt.dat`-Parser, DACH-Filter, Caching (SQLite vs. JSON)
-- [ ] Airport-Schwierigkeits-Prompt + Scoring
-- [ ] Post-Flight-Bewertung: Zeitkorrelation der ATC-/Flugdaten-JSONs + LLM-Urteil
-- [ ] Gamification-Layer
+- [x] Airport-Daten-Layer: `apt.dat`-Parser, DACH-Filter, JSON-Cache
+- [x] Airport-Schwierigkeits-Prompt + LLM-Scoring (regelbasierter Fallback ohne Key/Cache)
+- [x] Pre-Flight-Flugvorschläge inkl. Ground-Control-Filter + FMS-Übernahme
+- [x] Post-Flight-Bewertung: Zeitkorrelation der ATC-/Flugdaten-JSONs + LLM-Urteil
+- [x] Windows-Portierung + CI (GitHub Actions, SkunkCrafts-Updater)
+- [ ] Post-Flight-History: bereits bewertete Sessions durchblättern (#13)
+- [ ] Gamification-Layer (#7)
 
 ### Nicht-Ziele
 
