@@ -10,7 +10,8 @@ CATCH2_SENTINEL := vendor/catch2/catch_amalgamated.hpp
 
 CATCH2_VERSION := 3.15.1
 
-.PHONY: all help setup build install test test-unit lint format clean distclean
+.PHONY: all help setup build install test test-unit lint format clean distclean \
+        ci-remote win-artifact
 
 .DEFAULT_GOAL := help
 
@@ -29,6 +30,9 @@ help:
 	@echo "  make lint           Run clang-tidy on src/*.cpp"
 	@echo "  make clean          Remove build dirs"
 	@echo "  make distclean      clean + remove sdk/ and vendor/"
+	@echo ""
+	@echo "  make ci-remote      Trigger the GitHub Actions build (mac + Windows)"
+	@echo "  make win-artifact   Download the latest Windows CI .xpl into dist-win/"
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
 setup: $(SDK_SENTINEL) $(IMGUI_SENTINEL) $(JSON_SENTINEL) $(CATCH2_SENTINEL)
@@ -42,12 +46,13 @@ $(SDK_SENTINEL):
 	curl -fsSL "https://developer.x-plane.com/wp-content/plugins/code-sample-generation/sdk_zip_files/XPSDK430.zip" \
 	     -o "$$TMP/sdk.zip"; \
 	unzip -q "$$TMP/sdk.zip" -d "$$TMP/sdk_extracted"; \
-	mkdir -p sdk/XPLM sdk/XPWidgets sdk/Libraries/Mac; \
+	mkdir -p sdk/XPLM sdk/XPWidgets sdk/Libraries/Mac sdk/Libraries/Win; \
 	find "$$TMP/sdk_extracted" -path "*/CHeaders/XPLM/*.h"    -exec cp {} sdk/XPLM/ \;; \
 	find "$$TMP/sdk_extracted" -path "*/CHeaders/Widgets/*.h" -exec cp {} sdk/XPWidgets/ \;; \
 	cp -R "$$TMP/sdk_extracted"/*/Libraries/Mac/*.framework sdk/Libraries/Mac/ 2>/dev/null || \
-	find "$$TMP/sdk_extracted" -name "*.framework" -exec cp -R {} sdk/Libraries/Mac/ \;
-	@echo "SDK headers installed."
+	find "$$TMP/sdk_extracted" -name "*.framework" -exec cp -R {} sdk/Libraries/Mac/ \;; \
+	find "$$TMP/sdk_extracted" -path "*/Libraries/Win/*.lib" -exec cp {} sdk/Libraries/Win/ \; 2>/dev/null || true
+	@echo "SDK headers installed (Mac frameworks + Win link libs)."
 
 $(IMGUI_SENTINEL):
 	@echo "Downloading Dear ImGui v1.92.8..."
@@ -147,12 +152,34 @@ lint: $(SDK_SENTINEL) $(IMGUI_SENTINEL) $(JSON_SENTINEL) $(CATCH2_SENTINEL)
 	    echo "clang-tidy not found. Install with: brew install llvm"; exit 1; }
 	cmake -B build-lint -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
 	    -DCMAKE_OSX_ARCHITECTURES="$(shell uname -m)" -Wno-dev
+	@# Exclude *_win.cpp: they pull <windows.h>/<wincred.h>, unresolvable on
+	@# the macOS toolchain.
 	clang-tidy -p build-lint --extra-arg="-isysroot" --extra-arg="$(shell xcrun --show-sdk-path)" \
-	    src/main.cpp src/*/*.cpp
+	    $(shell find src -name '*.cpp' ! -name '*_win.cpp')
+
+# ── CI (Windows via GitHub Actions) ────────────────────────────────────────────
+# GitHub Actions is the Windows compiler — there is no local MSVC toolchain.
+# `ci-remote` builds the PUSHED state of the current branch, not the working tree.
+BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
+
+ci-remote:
+	@command -v gh >/dev/null 2>&1 || { echo "gh CLI not found. Install with: brew install gh"; exit 1; }
+	@if [ -n "$$(git status --porcelain)" ]; then \
+	    echo "WARNING: uncommitted changes — CI builds the pushed state of '$(BRANCH)', not your worktree."; fi
+	@if [ -n "$$(git log origin/$(BRANCH)..$(BRANCH) 2>/dev/null)" ]; then \
+	    echo "WARNING: unpushed commits on '$(BRANCH)' — push first so CI sees them."; fi
+	gh workflow run build.yml --ref "$(BRANCH)"
+	@echo "Triggered. Watch: gh run watch  (or: gh run list --workflow=build.yml)"
+
+win-artifact:
+	@command -v gh >/dev/null 2>&1 || { echo "gh CLI not found. Install with: brew install gh"; exit 1; }
+	@rm -rf dist-win
+	gh run download -n xp_wellys_vfr_trainer-win -D dist-win
+	@echo "Downloaded Windows artifact into dist-win/."
 
 # ── Clean ─────────────────────────────────────────────────────────────────────
 clean:
-	rm -rf build/ build-test/ build-lint/
+	rm -rf build/ build-test/ build-lint/ build-win/ dist/ dist-win/
 
 distclean: clean
 	rm -rf sdk/ vendor/

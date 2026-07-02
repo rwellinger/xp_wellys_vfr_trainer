@@ -17,7 +17,9 @@ Vor jeder Implementierung dort nachschauen wie es gelöst ist:
 Adaptieren, nicht blind kopieren. Abweichungen begründen.
 
 ## Plattform & Toolchain
-- macOS ARM64 (Apple Silicon)
+- macOS ARM64 (Apple Silicon) — lokaler Build; universal .xpl (arm64 + x86_64)
+- Windows x64 (cloud-only) — nur via GitHub Actions kompiliert (MSVC/Ninja +
+  vcpkg static libcurl); kein lokaler Windows-Toolchain
 - X-Plane 12.1+ (FMS-Flugplan-Übernahme nutzt die XPLM410-Multi-FPL-API)
 - C++ Native X-Plane Plugin
 - Miniconda für Python-Hilfsscripts falls nötig
@@ -106,11 +108,13 @@ ad-hoc-signiertes universal `.xpl`. Details siehe `README.md`.
 
 ## Build-Kommandos
 ```
-make setup     # SDK + vendor laden (sdk/, vendor/ — nicht versioniert)
-make build     # universal .xpl -> build/
-make test      # Catch2-Unit-Tests
-make install   # nach X-Plane kopieren + ad-hoc codesignen
-make lint      # clang-tidy (optional, braucht brew llvm)
+make setup       # SDK + vendor laden (sdk/, vendor/ — nicht versioniert)
+make build       # universal .xpl -> build/
+make test        # Catch2-Unit-Tests
+make install     # nach X-Plane kopieren + ad-hoc codesignen
+make lint        # clang-tidy (optional, braucht brew llvm; *_win.cpp ausgenommen)
+make ci-remote   # GitHub-Actions-Build (mac + Windows) anstoßen
+make win-artifact# Windows-.xpl aus der CI nach dist-win/ laden
 ```
 
 ## Offene Fragen / nächste Schritte
@@ -145,6 +149,12 @@ make lint      # clang-tidy (optional, braucht brew llvm)
       in `trainer_ui.cpp` (Button, `deps::all_ready()`-Gate), Tests
       `tests/test_postflight.cpp`. Doku: `docs/post_flight_report.md`,
       `docs/post_flight_correlation.md` (v2 umgesetzt)
+- [x] Windows-Portierung + CI (#14/#15): plattformspezifischer Code
+      (`clipboard_win.cpp`, keychain `_WIN32`-Credential-Manager, settings
+      `_mkdir`-Shim, trainer_ui Framebuffer-Scale-Fix für Vulkan/HiDPI),
+      CMake `elseif(WIN32)`-Block, GitHub-Actions-Workflow (mac-universal +
+      Windows-Slice + Tag-Release), SkunkCrafts-Updater-Tooling
+      (`tools/skunkcrafts/`). Windows kompiliert ausschließlich über CI.
 - [ ] Gamification-Layer
 
 ## Konventionen (etabliert)

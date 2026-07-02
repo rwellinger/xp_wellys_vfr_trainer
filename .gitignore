@@ -1,6 +1,9 @@
 build/
 build-test/
 build-lint/
+build-win/
+dist/
+dist-win/
 download/
 sdk/
 vendor/

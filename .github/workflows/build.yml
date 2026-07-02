@@ -1,0 +1,215 @@
+name: Build
+
+on:
+  # Manual trigger — `gh workflow run build.yml --ref <branch>` (make ci-remote).
+  # Builds the macOS universal binary + the Windows slice WITHOUT cutting a
+  # release (the GitHub release ZIP stays tag-only). Lets the Windows .xpl be
+  # downloaded (make win-artifact) and bring-up-tested before a release tag.
+  # NOTE: CI always builds the PUSHED state of the ref, never your local worktree.
+  workflow_dispatch:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  push:
+    branches:
+      # Feature branch for the Windows port: build both slices on every push
+      # so the Windows .xpl can be tested before a release tag.
+      - windows_support
+    tags:
+      - 'v*'
+
+jobs:
+  # ── macOS universal build ───────────────────────────────────────────────────
+  # The trainer is cloud-only, so one CMake configure with both architectures
+  # yields a universal .xpl directly (no submodules, no lipo). Runs in PARALLEL
+  # with build-windows; the release job folds the two artifacts together.
+  build-macos:
+    runs-on: macos-15
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup dependencies
+        run: make setup
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: ${{ runner.os }}-${{ github.job }}
+          max-size: 1500M
+          variant: ccache
+
+      - name: Run unit tests
+        run: make test
+
+      - name: Build (universal)
+        run: |
+          make build
+          ccache --show-stats
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xp_wellys_vfr_trainer-mac
+          path: build/xp_wellys_vfr_trainer.xpl
+          if-no-files-found: error
+
+  # ── Windows slice (cloud-only) ──────────────────────────────────────────────
+  # GitHub Actions is the Windows compiler — no local MSVC toolchain needed.
+  # Same source tree, MSVC/Ninja, static libcurl from vcpkg (Schannel TLS → zero
+  # extra DLLs). The per-arch .xpl MUST carry the plugin name (not win.xpl) —
+  # X-Plane 12 on Windows silently skips a generically named file.
+  build-windows:
+    runs-on: windows-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up MSVC developer environment
+        # Puts cl.exe + the Windows SDK on PATH so CMake's Ninja generator finds
+        # the toolchain directly (sidesteps the flaky VS-generator lookup).
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install libcurl (vcpkg, static, Schannel TLS)
+        shell: pwsh
+        run: vcpkg install curl:x64-windows-static
+
+      - name: Setup dependencies (SDK headers + Win libs, ImGui, json)
+        # PowerShell, not Git Bash: windows-latest's bash ships GNU tar, which
+        # cannot extract .zip; Expand-Archive handles it.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path sdk/XPLM, sdk/XPWidgets, sdk/Libraries/Win, vendor/imgui/backends | Out-Null
+
+          Write-Host "Downloading X-Plane SDK..."
+          curl.exe -fsSL "https://developer.x-plane.com/wp-content/plugins/code-sample-generation/sdk_zip_files/XPSDK430.zip" -o sdk.zip
+          Expand-Archive -Path sdk.zip -DestinationPath sdk_extracted -Force
+          Get-ChildItem sdk_extracted -Recurse -Filter *.h   | Where-Object { $_.FullName -match '\\CHeaders\\XPLM\\' }   | Copy-Item -Destination sdk/XPLM/
+          Get-ChildItem sdk_extracted -Recurse -Filter *.h   | Where-Object { $_.FullName -match '\\CHeaders\\Widgets\\' } | Copy-Item -Destination sdk/XPWidgets/
+          Get-ChildItem sdk_extracted -Recurse -Filter *.lib | Where-Object { $_.FullName -match '\\Libraries\\Win\\' }    | Copy-Item -Destination sdk/Libraries/Win/
+
+          Write-Host "Downloading Dear ImGui v1.92.8..."
+          curl.exe -fsSL "https://github.com/ocornut/imgui/archive/refs/tags/v1.92.8.zip" -o imgui.zip
+          Expand-Archive -Path imgui.zip -DestinationPath imgui_extracted -Force
+          $SRC = "imgui_extracted/imgui-1.92.8"
+          Copy-Item "$SRC/imgui.h","$SRC/imgui.cpp" vendor/imgui/
+          Copy-Item "$SRC/imgui_draw.cpp","$SRC/imgui_tables.cpp","$SRC/imgui_widgets.cpp" vendor/imgui/
+          Copy-Item "$SRC/imgui_internal.h","$SRC/imconfig.h" vendor/imgui/
+          Copy-Item "$SRC/imstb_textedit.h","$SRC/imstb_rectpack.h","$SRC/imstb_truetype.h" vendor/imgui/
+          Copy-Item "$SRC/backends/imgui_impl_opengl2.h","$SRC/backends/imgui_impl_opengl2.cpp" vendor/imgui/backends/
+
+          Write-Host "Downloading nlohmann/json v3.12.0..."
+          curl.exe -fsSL "https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp" -o vendor/json.hpp
+
+      - name: Configure (CMake, Ninja + MSVC, cloud-only)
+        shell: pwsh
+        run: |
+          cmake -B build-win -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+            -DBUILD_TESTS=OFF `
+            -Wno-dev
+
+      - name: Build (Release)
+        shell: pwsh
+        run: cmake --build build-win --target xp_wellys_vfr_trainer --parallel
+
+      - name: Stage drop-in bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE=dist/xp_wellys_vfr_trainer
+          mkdir -p "$STAGE/win_x64" "$STAGE/data"
+          cp build-win/xp_wellys_vfr_trainer.xpl "$STAGE/win_x64/"
+          cp data/settings.json                  "$STAGE/data/"
+          cp -r docs "$STAGE/docs"
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xp_wellys_vfr_trainer-win
+          path: dist/xp_wellys_vfr_trainer
+          if-no-files-found: error
+
+  # ── Release: package both slices into one drop-in ZIP + publish ─────────────
+  # Tag-only end job. Waits for BOTH platform builds, folds them into a single
+  # drop-in tree (mac_x64/ + win_x64/), codesigns the mac slice, generates the
+  # SkunkCrafts control files, creates the GitHub release ZIP and force-pushes
+  # the update tree to the `release` branch. Runs on macOS because codesign is
+  # macOS-only.
+  release:
+    runs-on: macos-15
+    needs: [build-macos, build-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download macOS slice
+        uses: actions/download-artifact@v4
+        with:
+          name: xp_wellys_vfr_trainer-mac
+          path: mac-dist
+
+      - name: Download Windows slice
+        uses: actions/download-artifact@v4
+        with:
+          name: xp_wellys_vfr_trainer-win
+          path: win-dist
+
+      - name: Stage release bundle
+        run: |
+          set -euo pipefail
+          STAGE=dist/xp_wellys_vfr_trainer
+          mkdir -p "$STAGE/mac_x64" "$STAGE/win_x64" "$STAGE/data"
+
+          # Windows slice (cloud-only, self-contained DLL — no extra libs).
+          cp win-dist/win_x64/xp_wellys_vfr_trainer.xpl "$STAGE/win_x64/"
+
+          # macOS universal slice — ad-hoc codesign (no dylibs to fix up).
+          cp mac-dist/xp_wellys_vfr_trainer.xpl "$STAGE/mac_x64/"
+          codesign --force --deep --sign - "$STAGE/mac_x64/xp_wellys_vfr_trainer.xpl"
+
+          cp data/settings.json "$STAGE/data/"
+          cp -r docs "$STAGE/docs"
+
+          # Generate the SkunkCrafts Updater control files into the staged tree
+          # BEFORE zipping, so the GitHub-release ZIP also carries
+          # skunkcrafts_updater.cfg. Version from the tag (v1.2.3 -> 1.2.3).
+          python3 tools/skunkcrafts/generate.py \
+            --tree "$STAGE" --version "${GITHUB_REF_NAME#v}"
+
+          cd dist && zip -r xp_wellys_vfr_trainer.zip xp_wellys_vfr_trainer/
+
+      - name: Create release with assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/xp_wellys_vfr_trainer.zip
+          generate_release_notes: true
+
+      - name: Publish SkunkCrafts update tree
+        # Force-push the staged plugin tree to the `release` branch that the
+        # skunkcrafts_updater.cfg `module` URL serves via raw.githubusercontent.
+        # A single orphan commit each release keeps the branch from accumulating
+        # binary history.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          STAGE=dist/xp_wellys_vfr_trainer
+          pushd "$STAGE"
+          git init -q
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "release ${GITHUB_REF_NAME}"
+          git branch -M release
+          git push --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" release
+          popd
