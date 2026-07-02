@@ -11,7 +11,7 @@ CATCH2_SENTINEL := vendor/catch2/catch_amalgamated.hpp
 CATCH2_VERSION := 3.15.1
 
 .PHONY: all help setup build install test test-unit lint format clean distclean \
-        ci-remote win-artifact
+        ci-remote win-artifact cleanup-tags cleanup-branches cleanup-runs
 
 .DEFAULT_GOAL := help
 
@@ -33,6 +33,10 @@ help:
 	@echo ""
 	@echo "  make ci-remote      Trigger the GitHub Actions build (mac + Windows)"
 	@echo "  make win-artifact   Download the latest Windows CI .xpl into dist-win/"
+	@echo ""
+	@echo "  make cleanup-tags      Prune local tags no longer on origin"
+	@echo "  make cleanup-branches  Prune local branches whose remote is gone"
+	@echo "  make cleanup-runs      Delete all GitHub Actions runs except the newest per workflow"
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
 setup: $(SDK_SENTINEL) $(IMGUI_SENTINEL) $(JSON_SENTINEL) $(CATCH2_SENTINEL)
@@ -176,6 +180,36 @@ win-artifact:
 	@rm -rf dist-win
 	gh run download -n xp_wellys_vfr_trainer-win -D dist-win
 	@echo "Downloaded Windows artifact into dist-win/."
+
+# ── Cleanup (git + CI housekeeping) ────────────────────────────────────────────
+cleanup-tags:
+	git fetch --prune --prune-tags origin
+	@echo "Local tags synced with remote."
+
+cleanup-branches:
+	@echo "Pruning remote-tracking references..."
+	@git fetch --prune origin
+	@echo ""
+	@echo "Local branches whose upstream is gone:"
+	@STALE=$$(git for-each-ref --format '%(refname:short) %(upstream:track)' refs/heads | awk '$$2 == "[gone]" {print $$1}'); \
+	if [ -z "$$STALE" ]; then \
+	    echo "  (none)"; \
+	else \
+	    echo "$$STALE" | sed 's/^/  /'; \
+	    echo ""; \
+	    echo "$$STALE" | xargs -n1 git branch -d; \
+	fi
+	@echo "Local branches synced with remote."
+
+cleanup-runs:
+	@command -v gh >/dev/null 2>&1 || { \
+	    echo "gh not found. Install with: brew install gh"; exit 1; }
+	@echo "Deleting GitHub Actions runs (keeping newest per workflow)..."
+	@for wf in $$(gh workflow list --json id -q '.[].id'); do \
+	    gh run list --workflow=$$wf --limit 1000 --json databaseId -q '.[1:] | .[].databaseId' \
+	        | xargs -I {} gh run delete {}; \
+	done
+	@echo "Cleanup complete."
 
 # ── Clean ─────────────────────────────────────────────────────────────────────
 clean:
