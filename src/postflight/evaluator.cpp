@@ -54,7 +54,11 @@ std::string g_model; // "openai:gpt-4o-mini" — provenance only
 std::string now_iso() {
   std::time_t t = std::time(nullptr);
   std::tm tm_utc{};
+#if defined(_WIN32)
+  gmtime_s(&tm_utc, &t); // MSVC: reversed arg order vs POSIX gmtime_r
+#else
   gmtime_r(&t, &tm_utc);
+#endif
   char buf[32] = {};
   std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm_utc);
   return buf;
@@ -64,7 +68,11 @@ std::string now_iso() {
 std::string hms_utc(std::int64_t ts) {
   std::time_t t = static_cast<std::time_t>(ts);
   std::tm tm_utc{};
+#if defined(_WIN32)
+  gmtime_s(&tm_utc, &t); // MSVC: reversed arg order vs POSIX gmtime_r
+#else
   gmtime_r(&t, &tm_utc);
+#endif
   char buf[16] = {};
   std::strftime(buf, sizeof(buf), "%H:%M:%S", &tm_utc);
   return buf;
