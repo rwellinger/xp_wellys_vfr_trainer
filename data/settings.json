@@ -1,0 +1,12 @@
+{
+  "backend_mode": "openai",
+  "openai_lm_model": "gpt-4o-mini",
+  "mistral_lm_model": "mistral-large-latest",
+  "api_key_saved": false,
+  "mistral_api_key_saved": false,
+  "debug_logging": false,
+  "window_x": -1.0,
+  "window_y": -1.0,
+  "window_w": -1.0,
+  "window_h": -1.0
+}
