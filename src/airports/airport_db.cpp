@@ -25,7 +25,9 @@ std::vector<Airport> g_airports;  // published result
 std::atomic<bool> g_ready{false}; // load finished (success or failure)
 std::atomic<bool> g_started{false};
 
-void load_worker(std::string path) {
+// `path` is safe as a reference: std::thread stores its own decayed copy of the
+// argument and keeps it alive for the whole thread body.
+void load_worker(const std::string &path) {
   std::vector<Airport> parsed;
   std::ifstream in(path);
   if (!in.is_open()) {

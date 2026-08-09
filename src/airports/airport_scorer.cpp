@@ -206,11 +206,13 @@ void pump() {
     queue.pop_front();
   }
   in_flight = true;
-  const std::string model = model_tag;
 
+  // Init-captures on purpose: capturing `const` locals would make the closure's
+  // move constructor fall back to copying (and therefore throw), which trips
+  // bugprone-exception-escape on the std::function conversion.
   backends::lm::respond_json_async(
       kSystemPrompt, build_batch_prompt(batch),
-      [batch, model](std::string text, bool success) {
+      [batch, model = model_tag](const std::string &text, bool success) {
         // Main thread (flight-loop drain).
         in_flight = false;
 

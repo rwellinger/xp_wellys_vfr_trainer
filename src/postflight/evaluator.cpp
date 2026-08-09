@@ -177,17 +177,16 @@ void evaluate_async(const AtcLog &atc, const FlightLog &flight,
 
   g_status = Status::Running;
 
-  // Snapshot the values the callback needs (it runs on a later frame).
-  const std::string key = g_key;
-  const std::string model = g_model;
-  const std::string lang = language;
-  const std::string dep = atc.flight.departure_airport;
-  const std::string arr = flight.arrival_icao;
-  const std::int64_t started = atc.flight.started_at_epoch;
-
+  // Snapshot the values the callback needs (it runs on a later frame) as
+  // init-captures. They must not be `const` locals: a const member forces the
+  // closure's move constructor to copy, which can throw and trips
+  // bugprone-exception-escape on the std::function conversion.
   backends::lm::respond_json_async(
       sys_prompt, user_prompt,
-      [key, model, lang, dep, arr, started](std::string text, bool success) {
+      [key = g_key, model = g_model, lang = language,
+       dep = atc.flight.departure_airport, arr = flight.arrival_icao,
+       started = atc.flight.started_at_epoch](const std::string &text,
+                                              bool success) {
         // Main thread (flight-loop drain).
         if (!success) {
           g_status = Status::Error;

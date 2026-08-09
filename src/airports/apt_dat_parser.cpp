@@ -10,7 +10,11 @@
 #include "airports/geo.hpp"
 
 #include <array>
+#include <cerrno>
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <limits>
 #include <sstream>
 
 namespace airports {
@@ -31,6 +35,40 @@ constexpr std::array<FreqCode, 5> kFreqCodes = {{
     {53, 1053, FrequencyType::GROUND},
     {54, 1054, FrequencyType::TOWER},
 }};
+
+// No-throw replacements for std::sto* — apt.dat rows are machine-generated but
+// malformed ones do occur, and a corrupt token must skip the row, not unwind.
+// Same acceptance as std::sto*: leading whitespace ok, trailing junk ignored,
+// no digits or out-of-range -> false (the row is dropped).
+bool to_double(const std::string &s, double &out) {
+  const char *begin = s.c_str();
+  char *end = nullptr;
+  errno = 0;
+  const double v = std::strtod(begin, &end);
+  if (end == begin || errno == ERANGE)
+    return false;
+  out = v;
+  return true;
+}
+
+bool to_float(const std::string &s, float &out) {
+  double v = 0.0;
+  if (!to_double(s, v))
+    return false;
+  out = static_cast<float>(v);
+  return true;
+}
+
+bool to_long(const std::string &s, long &out) {
+  const char *begin = s.c_str();
+  char *end = nullptr;
+  errno = 0;
+  const long v = std::strtol(begin, &end, 10);
+  if (end == begin || errno == ERANGE)
+    return false;
+  out = v;
+  return true;
+}
 
 std::string to_upper(std::string s) {
   for (char &c : s)
@@ -184,11 +222,8 @@ parse_apt_dat(std::istream &in,
       header_code = code;
       header_id = id;
       // current.icao stays empty until 1302 icao_code; flush() falls back to id.
-      try {
-        current.elevation_ft = std::stof(elev_tok);
-      } catch (...) {
+      if (!to_float(elev_tok, current.elevation_ft))
         current.elevation_ft = 0.0f;
-      }
       // Remainder of the line is the airport name.
       std::string rest;
       std::getline(iss, rest);
@@ -207,19 +242,15 @@ parse_apt_dat(std::istream &in,
       std::istringstream iss(line);
       std::string code_tok, key, value;
       iss >> code_tok >> key >> value;
-      try {
-        if (key == "datum_lat") {
-          current.lat = std::stod(value);
+      if (key == "datum_lat") {
+        if (to_double(value, current.lat))
           has_datum = true; // lat first; lon expected on its own 1302 line
-        } else if (key == "datum_lon") {
-          current.lon = std::stod(value);
+      } else if (key == "datum_lon") {
+        if (to_double(value, current.lon))
           has_datum = true;
-        } else if (key == "icao_code" && !value.empty()) {
-          // Real-world ICAO — overrides the row-1 id as the canonical code.
-          current.icao = to_upper(value);
-        }
-      } catch (...) {
-        // ignore malformed metadata
+      } else if (key == "icao_code" && !value.empty()) {
+        // Real-world ICAO — overrides the row-1 id as the canonical code.
+        current.icao = to_upper(value);
       }
       continue;
     }
@@ -230,19 +261,17 @@ parse_apt_dat(std::istream &in,
       if (code == fc.old_code || code == fc.new_code) {
         std::istringstream iss(line);
         std::string code_tok, freq_tok;
-        if (iss >> code_tok >> freq_tok) {
-          try {
-            uint32_t freq_int =
-                static_cast<uint32_t>(std::stoul(freq_tok));
-            uint32_t freq_khz =
-                (code >= 1000) ? freq_int : freq_int * 10; // new=kHz, old=MHz*100
-            std::string name_rest;
-            std::getline(iss, name_rest);
-            FrequencyType type = classify_by_name(fc.type, name_rest);
-            current.frequencies.push_back({freq_khz, type});
-          } catch (...) {
-            // ignore malformed frequency
-          }
+        long freq_raw = 0;
+        if ((iss >> code_tok >> freq_tok) && to_long(freq_tok, freq_raw) &&
+            freq_raw >= 0 &&
+            freq_raw <= std::numeric_limits<std::uint32_t>::max()) {
+          const auto freq_int = static_cast<std::uint32_t>(freq_raw);
+          const std::uint32_t freq_khz =
+              (code >= 1000) ? freq_int : freq_int * 10; // new=kHz, old=MHz*100
+          std::string name_rest;
+          std::getline(iss, name_rest);
+          FrequencyType type = classify_by_name(fc.type, name_rest);
+          current.frequencies.push_back({freq_khz, type});
         }
         freq_handled = true;
         break;
@@ -261,32 +290,27 @@ parse_apt_dat(std::istream &in,
       if (t.size() < 20)
         continue;
 
-      try {
-        Runway rwy;
-        rwy.width_m = std::stof(t[1]);
-        rwy.surface_code = std::stoi(t[2]);
-        rwy.end1.number = t[8];
-        rwy.end1.lat = std::stod(t[9]);
-        rwy.end1.lon = std::stod(t[10]);
-        rwy.end2.number = t[17];
-        rwy.end2.lat = std::stod(t[18]);
-        rwy.end2.lon = std::stod(t[19]);
-        rwy.length_m = static_cast<float>(haversine_distance(
-            rwy.end1.lat, rwy.end1.lon, rwy.end2.lat, rwy.end2.lon));
-        rwy.end1.heading_deg = initial_bearing(rwy.end1.lat, rwy.end1.lon,
-                                               rwy.end2.lat, rwy.end2.lon);
-        rwy.end2.heading_deg =
-            std::fmod(rwy.end1.heading_deg + 180.0f, 360.0f);
+      Runway rwy;
+      long surface = 0;
+      if (!to_float(t[1], rwy.width_m) || !to_long(t[2], surface) ||
+          !to_double(t[9], rwy.end1.lat) || !to_double(t[10], rwy.end1.lon) ||
+          !to_double(t[18], rwy.end2.lat) || !to_double(t[19], rwy.end2.lon))
+        continue; // malformed runway row — skip it
+      rwy.surface_code = static_cast<int>(surface);
+      rwy.end1.number = t[8];
+      rwy.end2.number = t[17];
+      rwy.length_m = static_cast<float>(haversine_distance(
+          rwy.end1.lat, rwy.end1.lon, rwy.end2.lat, rwy.end2.lon));
+      rwy.end1.heading_deg = initial_bearing(rwy.end1.lat, rwy.end1.lon,
+                                             rwy.end2.lat, rwy.end2.lon);
+      rwy.end2.heading_deg = std::fmod(rwy.end1.heading_deg + 180.0f, 360.0f);
 
-        if (!has_runway_mid) {
-          mid_lat_sum = (rwy.end1.lat + rwy.end2.lat) * 0.5;
-          mid_lon_sum = (rwy.end1.lon + rwy.end2.lon) * 0.5;
-          has_runway_mid = true;
-        }
-        current.runways.push_back(std::move(rwy));
-      } catch (...) {
-        // ignore malformed runway
+      if (!has_runway_mid) {
+        mid_lat_sum = (rwy.end1.lat + rwy.end2.lat) * 0.5;
+        mid_lon_sum = (rwy.end1.lon + rwy.end2.lon) * 0.5;
+        has_runway_mid = true;
       }
+      current.runways.push_back(std::move(rwy));
       continue;
     }
   }
