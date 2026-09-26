@@ -44,10 +44,11 @@ make test      # baut + führt die Catch2-Unit-Tests aus
 make install   # kopiert + ad-hoc-codesigned das Plugin nach X-Plane
 ```
 
-Der Install-Pfad ist:
+Der Install-Pfad ist `<X-Plane 12>/xplaunchData/Plugins/` (XPLaunch), sonst
+`<X-Plane 12>/Resources/plugins/`; überschreibbar via `XPLANE_ROOT=... make install`:
 
 ```
-<X-Plane 12>/Resources/available plugins/xp_wellys_vfr_trainer/
+<plugin root>/xp_wellys_vfr_trainer/
 ├── mac_x64/xp_wellys_vfr_trainer.xpl
 ├── win_x64/xp_wellys_vfr_trainer.xpl   (aus einem Release / Windows-Artifact)
 └── data/settings.json

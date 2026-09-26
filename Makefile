@@ -1,7 +1,14 @@
 SHELL := /bin/bash
 
-XPLANE_ROOT := /Users/robertw/X-Plane 12
-PLUGIN_DIR  := $(XPLANE_ROOT)/Resources/available plugins/xp_wellys_vfr_trainer
+# Override on machines with a different install path: XPLANE_ROOT="/path/to/X-Plane 12" make install
+XPLANE_ROOT ?= /Users/robertw/X-Plane 12
+# XPLaunch keeps the plugins in xplaunchData/Plugins and symlinks them into
+# Resources/plugins; without it, Resources/plugins is the real thing. Install into
+# whichever exists — never into "available plugins", a parking spot X-Plane never reads.
+PLUGIN_ROOT := $(shell [ -d "$(XPLANE_ROOT)/xplaunchData/Plugins" ] \
+                 && echo "$(XPLANE_ROOT)/xplaunchData/Plugins" \
+                 || echo "$(XPLANE_ROOT)/Resources/plugins")
+PLUGIN_DIR  := $(PLUGIN_ROOT)/xp_wellys_vfr_trainer
 
 # Staging dir for the SkunkCrafts release tree. Under build/ so `make clean`
 # removes it.
@@ -145,6 +152,7 @@ install:
 	@cp build/xp_wellys_vfr_trainer.xpl "$(PLUGIN_DIR)/mac_x64/"
 	@xattr -dr com.apple.quarantine "$(PLUGIN_DIR)/mac_x64/xp_wellys_vfr_trainer.xpl" 2>/dev/null || true
 	@codesign --force --deep --sign - "$(PLUGIN_DIR)/mac_x64/xp_wellys_vfr_trainer.xpl"
+	@echo "Installed: $(PLUGIN_DIR)/mac_x64/xp_wellys_vfr_trainer.xpl"
 	@mkdir -p "$(PLUGIN_DIR)/data"
 	@if [ ! -f "$(PLUGIN_DIR)/data/settings.json" ]; then \
 	    cp data/settings.json "$(PLUGIN_DIR)/data/"; \

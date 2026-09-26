@@ -26,7 +26,7 @@ never accidentally tracked if present in the staged tree.
 
 Usage:
     python3 tools/skunkcrafts/generate.py \
-        --tree  "<X-Plane>/Resources/available plugins/xp_wellys_vfr_trainer" \
+        --tree  "<X-Plane>/xplaunchData/Plugins/xp_wellys_vfr_trainer" \
         --version 0.1.0
 
 Run it against the *release* tree you are about to publish (the same layout
