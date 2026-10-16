@@ -27,13 +27,13 @@ jobs:
     runs-on: macos-15
     if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Setup dependencies
         run: make setup
 
       - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@v1.2.23
+        uses: hendrikmuhs/ccache-action@v1.2.24
         with:
           key: ${{ runner.os }}-${{ github.job }}
           max-size: 1500M
@@ -48,7 +48,7 @@ jobs:
           ccache --show-stats
 
       - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: xp_wellys_vfr_trainer-mac
           path: build/xp_wellys_vfr_trainer.xpl
@@ -63,14 +63,18 @@ jobs:
     runs-on: windows-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up MSVC developer environment
         # Puts cl.exe + the Windows SDK on PATH so CMake's Ninja generator finds
         # the toolchain directly (sidesteps the flaky VS-generator lookup).
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
+        # Inline vcvars64 instead of ilammy/msvc-dev-cmd (still on Node 20).
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul && set" | ForEach-Object {
+            if ($_ -match '^([^=]+)=(.*)$') { "$($matches[1])=$($matches[2])" | Out-File $env:GITHUB_ENV -Append -Encoding utf8 }
+          }
 
       - name: Install libcurl (vcpkg, static, Schannel TLS)
         shell: pwsh
@@ -130,7 +134,7 @@ jobs:
           cp -r docs "$STAGE/docs"
 
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: xp_wellys_vfr_trainer-win
           path: dist/xp_wellys_vfr_trainer
@@ -149,16 +153,16 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Download macOS slice
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: xp_wellys_vfr_trainer-mac
           path: mac-dist
 
       - name: Download Windows slice
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: xp_wellys_vfr_trainer-win
           path: win-dist
@@ -188,7 +192,7 @@ jobs:
           cd dist && zip -r xp_wellys_vfr_trainer.zip xp_wellys_vfr_trainer/
 
       - name: Create release with assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/xp_wellys_vfr_trainer.zip
           generate_release_notes: true
